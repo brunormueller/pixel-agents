@@ -52,6 +52,10 @@ server/                              Lifecycle runtime + Fastify HTTP/WS server
     assetLoader.ts                   PNG → SpriteData via pngjs
     teamUtils.ts                     isInlineTeammateOf, getInlineTeammates, hasInlineTeammates
     types.ts                         ServerAgentState
+    multiplayer/                     Opt-in office-to-office sync (docs/multiplayer.md)
+      protocol.ts                    Relay frames + sanitizers (RemoteAgentState = core RemoteAgent)
+      relayServer.ts                 `pixel-agents relay`: room fan-out, last snapshot per peer, nothing persisted
+      multiplayerClient.ts           Folds StoreEvents into a summary, publishes it, broadcasts `remotePeers`
     constants.ts                     All timing/scanning constants
   __tests__/                         28 Vitest files
   manual-hook-events.http            Manual hook testing helper (REST-Client format)
@@ -110,6 +114,7 @@ webview-ui/                          React 19 + Canvas UI (depends only on core/
       engine/
         characters.ts                Character FSM (idle/walk/type) + wander AI
         officeState.ts               Game world (layout, characters, seats, selection, subagents, consent greeter)
+        remoteAgents.ts              RemoteAgentRegistry: `remotePeers` snapshots → remote characters (pure, Node-tested)
         gameLoop.ts                  rAF loop with delta-time cap (0.1 s)
         renderer.ts                  Canvas: tiles, z-sorted entities, overlays, edit UI
         matrixEffect.ts              Spawn/despawn digital rain (drawing only)
@@ -196,7 +201,7 @@ Adding a new CLI integration is one subdirectory under `server/src/providers/hoo
 
 `core/asyncapi.yaml` is the contract. Pinned to **3.0.0** because `@asyncapi/modelina@5.10.1` declares `supportedVersions: ['3.0.0']` only; bumping to 3.1.0 produces `export type Root = any`. Revisit when Modelina ships 3.1.0 support.
 
-- **27 ServerMessage variants** (server → client): agent lifecycle, agent activity, sub-agent activity, team + context usage, assets, settings + workspace, diagnostics.
+- **34 ServerMessage variants** (server → client): agent lifecycle, agent activity, sub-agent activity, team + context usage, assets, settings + workspace, diagnostics.
 - **18 ClientMessage variants** (client → server): lifecycle (`webviewReady`, `launchAgent`, `focusAgent`, `closeAgent`), layout (`saveAgentSeats`, `saveLayout`, `exportLayout`, `importLayout`), settings (`setSoundEnabled`, `setHooksEnabled`, `setWatchAllSessions`, `setAlwaysShowLabels`, `setHooksInfoShown`, `setLastSeenVersion`), discovery + assets, diagnostics.
 
 Both unions use `oneOf` with `discriminator: type`. Every concrete message sets `additionalProperties: false`.
@@ -310,6 +315,15 @@ Fastify v5 with `@fastify/cors`, `@fastify/websocket`, and (in standalone) `@fas
 The **hooks preference is persisted only after the install/uninstall settled and the on-disk result agrees** — writing it first strands the user when an uninstall fails: entries still firing, but a persisted hooks-off makes the next startup skip the consent/install path entirely.
 
 Server discovery written to `~/.pixel-agents/server.json` with `{ port, pid, authToken }`. Multi-window safe: a second server detects an existing `server.json` and reuses or replaces it based on PID liveness.
+
+### Multiplayer (opt-in)
+
+Offices in the same **Room** on a **Relay** see each other's agents (vocabulary in CONTEXT.md; user docs in `docs/multiplayer.md`). Enabled by `~/.pixel-agents/multiplayer.json` (`{ relayUrl, room, displayName }`, read by `getMultiplayerSettings`) or, standalone, by `--relay/--room/--name`. Deliberately NOT a `config.json` key: every build rewrites config.json from the fields it knows, so an older extension in another window (the Marketplace release) silently drops unknown keys on its next write. `--relay` also forces the CLI to start its own server (`reuseExisting: false`) — a reused server would show another office's agents under this one's page. `npx pixel-agents relay` runs the relay.
+
+- `MultiplayerClient` subscribes to the SAME StoreEvents the transports read — no runtime change. It keeps a per-agent summary (`agentStatus`/`agentToolStart`/`Done`/`ToolsClear`/`Permission*`; background spawns ignored), debounces a `state` frame, and turns the relay's picture into a full-snapshot `remotePeers` broadcast. Both webviewReady handshakes replay it via `resend()` after `layoutLoaded`.
+- **Privacy is the design constraint**: only `RemoteAgent` (palette, hueShift, active/waiting, typing/reading, permission, awaitingInput) plus the display name leave the machine. Never status text, tool names, paths or folder names — `multiplayer.test.ts` pins that a `Reading secret.ts` status never reaches the other peer.
+- Both ends sanitize (relay trusts no peer, peer trusts no relay): caps on peers/room, agents/peer, frame size, frames/sec; control and bidi characters stripped from names.
+- **Positions never travel** — every office has its own layout. The webview's `RemoteAgentRegistry` keys characters by `(peerId, agentId)`, allocates ids downward from `REMOTE_AGENT_ID_BASE` (-1 000 000), seats them in free seats, holds a snapshot until `layoutLoaded`, and drives the normal FSM. Remote characters carry `isRemote`: excluded from `getPersistableSeats` and palette diversity, never focus a terminal, no close button.
 
 ### ClientMessageHandler
 

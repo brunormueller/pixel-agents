@@ -73,6 +73,7 @@ function App() {
     agentStatuses,
     subagentTools,
     subagentCharacters,
+    remoteCharacters,
     layoutReady,
     layoutWasReset,
     loadedAssets,
@@ -235,6 +236,8 @@ function App() {
   const handleClick = useCallback((agentId: number) => {
     // If clicked agent is a sub-agent, focus the parent's terminal instead
     const os = getOfficeState();
+    // Another office's agent: its terminal is on someone else's machine.
+    if (os.characters.get(agentId)?.isRemote) return;
     const meta = os.subagentMeta.get(agentId);
     const focusId = meta ? meta.parentAgentId : agentId;
     transport.send({ type: 'focusAgent', id: focusId });
@@ -431,6 +434,7 @@ function App() {
             agentTools={agentTools}
             subagentTools={subagentTools}
             subagentCharacters={subagentCharacters}
+            remoteCharacters={remoteCharacters}
             containerRef={containerRef}
             zoom={editor.zoom}
             panRef={editor.panRef}

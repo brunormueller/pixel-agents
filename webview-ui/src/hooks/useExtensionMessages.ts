@@ -1,18 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { HooksConsentRequest } from '../../../core/src/messages.js';
+import type { HooksConsentRequest, RemotePeer } from '../../../core/src/messages.js';
+import { REMOTE_TYPING_TOOL_NAME } from '../constants.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
 import type { ExistingAgentMeta, PendingAgent } from '../office/engine/existingAgents.js';
 import { reconcileExistingAgents } from '../office/engine/existingAgents.js';
 import type { OfficeState } from '../office/engine/officeState.js';
+import type { RemoteCharacter, RemoteToolNames } from '../office/engine/remoteAgents.js';
+import { RemoteAgentRegistry } from '../office/engine/remoteAgents.js';
 import { setGhostHeadlessAgents as setRendererGhostHeadlessAgents } from '../office/engine/renderer.js';
 import { setFloorSprites } from '../office/floorTiles.js';
 import { buildDynamicCatalog } from '../office/layout/furnitureCatalog.js';
 import { migrateLayoutColors } from '../office/layout/layoutSerializer.js';
 import { setCarpetSprites } from '../office/sprites/carpetTiles.js';
 import { setPetTemplates } from '../office/sprites/petSpriteData.js';
-import { setCharacterTemplates } from '../office/sprites/spriteData.js';
+import { getLoadedCharacterCount, setCharacterTemplates } from '../office/sprites/spriteData.js';
 import {
+  anyReadingToolName,
   extractToolName,
   isSubagentToolName,
   setProviderCapabilities,
@@ -75,6 +79,8 @@ interface ExtensionMessageState {
   agentStatuses: Record<number, string>;
   subagentTools: Record<number, Record<string, ToolActivity[]>>;
   subagentCharacters: SubagentCharacter[];
+  /** Other offices' agents in the multiplayer room (empty when multiplayer is off). */
+  remoteCharacters: RemoteCharacter[];
   layoutReady: boolean;
   layoutWasReset: boolean;
   loadedAssets?: { catalog: FurnitureAsset[]; sprites: Record<string, string[][]> };
@@ -129,6 +135,7 @@ export function useExtensionMessages(
     Record<number, Record<string, ToolActivity[]>>
   >({});
   const [subagentCharacters, setSubagentCharacters] = useState<SubagentCharacter[]>([]);
+  const [remoteCharacters, setRemoteCharacters] = useState<RemoteCharacter[]>([]);
   const [layoutReady, setLayoutReady] = useState(false);
   const [layoutWasReset, setLayoutWasReset] = useState(false);
   const [loadedAssets, setLoadedAssets] = useState<
@@ -165,6 +172,10 @@ export function useExtensionMessages(
   // Track whether initial layout has been loaded (ref to avoid re-render)
   const layoutReadyRef = useRef(false);
 
+  // Multiplayer: (peerId, remote agent id) → local character. Lives for the
+  // panel's lifetime so a character keeps its id (and seat) across snapshots.
+  const remoteRegistryRef = useRef(new RemoteAgentRegistry());
+
   // Live background spawn tools per agent (runInBackground agentToolStart, or a
   // lazily-created watched sub). Their sub-characters outlive the parent's turn:
   // agentToolsClear must NOT remove them — despawning and re-creating moved the
@@ -182,6 +193,11 @@ export function useExtensionMessages(
       if (!name) return;
       setAgentFolderNames((prev) => (prev.includes(name) ? prev : [...prev, name]));
     };
+
+    const remoteToolNames = (): RemoteToolNames => ({
+      reading: anyReadingToolName(),
+      typing: REMOTE_TYPING_TOOL_NAME,
+    });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handler = (msg: any) => {
@@ -236,6 +252,10 @@ export function useExtensionMessages(
           if (p.isHeadless) os.setHeadless(p.id, true);
         }
         pendingAgents = [];
+        // Remote characters take whatever seats the local agents left.
+        if (remoteRegistryRef.current.flush(os, getLoadedCharacterCount(), remoteToolNames())) {
+          setRemoteCharacters(remoteRegistryRef.current.characters());
+        }
         layoutReadyRef.current = true;
         setLayoutReady(true);
         if (msg.wasReset) {
@@ -244,6 +264,16 @@ export function useExtensionMessages(
         if (os.characters.size > 0) {
           saveAgentSeats(os);
         }
+      } else if (msg.type === 'remotePeers') {
+        const registry = remoteRegistryRef.current;
+        const changed = registry.reconcile(
+          os,
+          (Array.isArray(msg.peers) ? msg.peers : []) as RemotePeer[],
+          layoutReadyRef.current,
+          getLoadedCharacterCount(),
+          remoteToolNames(),
+        );
+        if (changed) setRemoteCharacters(registry.characters());
       } else if (msg.type === 'agentCreated') {
         const id = msg.id as number;
         const folderName = msg.folderName as string | undefined;
@@ -765,6 +795,7 @@ export function useExtensionMessages(
     agentStatuses,
     subagentTools,
     subagentCharacters,
+    remoteCharacters,
     layoutReady,
     layoutWasReset,
     loadedAssets,

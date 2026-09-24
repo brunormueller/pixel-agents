@@ -8,6 +8,7 @@
  * Each connecting WebSocket client receives the full state on webviewReady.
  */
 
+import * as os from 'os';
 import * as path from 'path';
 
 import { AgentRuntime } from './agentRuntime.js';
@@ -22,11 +23,15 @@ import type { AssetCache, ReloadAssetsSideEffect } from './clientMessageHandler.
 import {
   getHooksConsent,
   getHooksEnabled,
+  getMultiplayerSettings,
   grantHooksConsent,
   readConfig,
 } from './configPersistence.js';
-import { MAX_PORT, MIN_PORT } from './constants.js';
+import { MAX_PORT, MIN_PORT, MULTIPLAYER_RELAY_DEFAULT_PORT } from './constants.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
+import type { MultiplayerSettings } from './multiplayer/multiplayerClient.js';
+import { MultiplayerClient } from './multiplayer/multiplayerClient.js';
+import { startRelayServer } from './multiplayer/relayServer.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
 import { PixelAgentsServer } from './server.js';
 
@@ -37,6 +42,16 @@ export interface CliArgs {
    *  can run at once without a collision. --port picks a fixed one. */
   port?: number;
   host: string;
+  /** Multiplayer: join this relay (overrides ~/.pixel-agents/multiplayer.json, with --room/--name). */
+  relay?: string;
+  room?: string;
+  name?: string;
+}
+
+/** `pixel-agents relay [--port N] [--host H]` — run a multiplayer relay instead of an office. */
+export interface RelayCliArgs {
+  port: number;
+  host: string;
 }
 
 /** Thrown by parseArgs on an invalid --port. Kept separate from process.exit so
@@ -44,38 +59,97 @@ export interface CliArgs {
  *  place that turns a bad argument into an exit code. */
 export class CliArgsError extends Error {}
 
+function parsePort(flag: string, raw: string | undefined): number {
+  if (raw === undefined) {
+    throw new CliArgsError(
+      `Missing value for ${flag}: expected an integer between ${MIN_PORT} and ${MAX_PORT}.`,
+    );
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < MIN_PORT || parsed > MAX_PORT) {
+    throw new CliArgsError(
+      `Invalid --port "${raw}": must be an integer between ${MIN_PORT} and ${MAX_PORT}.`,
+    );
+  }
+  return parsed;
+}
+
+function requireValue(flag: string, raw: string | undefined): string {
+  if (raw === undefined || raw.startsWith('--')) {
+    throw new CliArgsError(`Missing value for ${flag}.`);
+  }
+  return raw;
+}
+
 export function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = { host: '127.0.0.1' };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port' || argv[i] === '-p') {
-      const raw = argv[i + 1];
-      if (raw === undefined) {
-        throw new CliArgsError(
-          `Missing value for ${argv[i]}: expected an integer between ${MIN_PORT} and ${MAX_PORT}.`,
-        );
-      }
-      const parsed = Number(raw);
-      if (!Number.isInteger(parsed) || parsed < MIN_PORT || parsed > MAX_PORT) {
-        throw new CliArgsError(
-          `Invalid --port "${raw}": must be an integer between ${MIN_PORT} and ${MAX_PORT}.`,
-        );
-      }
-      args.port = parsed;
+      args.port = parsePort(argv[i], argv[i + 1]);
       i++;
     } else if (argv[i] === '--host' && argv[i + 1]) {
       args.host = argv[i + 1];
       i++;
+    } else if (argv[i] === '--relay') {
+      const url = requireValue(argv[i], argv[i + 1]);
+      if (!/^wss?:\/\//i.test(url)) {
+        throw new CliArgsError(`Invalid --relay "${url}": must be a ws:// or wss:// URL.`);
+      }
+      args.relay = url;
+      i++;
+    } else if (argv[i] === '--room') {
+      args.room = requireValue(argv[i], argv[i + 1]);
+      i++;
+    } else if (argv[i] === '--name') {
+      args.name = requireValue(argv[i], argv[i + 1]);
+      i++;
     } else if (argv[i] === '--help') {
       console.log(`Usage: pixel-agents [options]
+       pixel-agents relay [--port <number>] [--host <string>]
 
 Options:
   --port, -p <number>   Port to listen on (default: OS-assigned ephemeral port)
   --host <string>       Host to bind to (default: 127.0.0.1)
-  --help                Show this help message`);
+  --relay <url>         Multiplayer: ws:// or wss:// URL of a pixel-agents relay
+  --room <string>       Multiplayer: room to join (required with --relay; treat it like a password)
+  --name <string>       Multiplayer: name shown to the other people in the room
+  --help                Show this help message
+
+Commands:
+  relay                 Run a multiplayer relay (default port ${MULTIPLAYER_RELAY_DEFAULT_PORT})`);
       process.exit(0);
     }
   }
+  if (args.relay && !args.room) {
+    throw new CliArgsError('--relay needs --room: peers only see each other inside the same room.');
+  }
   return args;
+}
+
+export function parseRelayArgs(argv: string[]): RelayCliArgs {
+  const args: RelayCliArgs = { port: MULTIPLAYER_RELAY_DEFAULT_PORT, host: '127.0.0.1' };
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--port' || argv[i] === '-p') {
+      args.port = parsePort(argv[i], argv[i + 1]);
+      i++;
+    } else if (argv[i] === '--host') {
+      args.host = requireValue(argv[i], argv[i + 1]);
+      i++;
+    }
+  }
+  return args;
+}
+
+/** Resolve the multiplayer settings: CLI flags win over multiplayer.json. */
+export function resolveMultiplayerSettings(args: CliArgs): MultiplayerSettings | undefined {
+  if (args.relay && args.room) {
+    return {
+      relayUrl: args.relay,
+      room: args.room,
+      displayName: args.name ?? os.userInfo().username,
+    };
+  }
+  return getMultiplayerSettings();
 }
 
 // ── Hooks consent ─────────────────────────────────────────────
@@ -103,7 +177,28 @@ function copyHookScriptOrReport(packageRoot: string, context = ''): boolean {
 
 // ── Main ──────────────────────────────────────────────────────
 
+async function runRelay(argv: string[]): Promise<void> {
+  let args: RelayCliArgs;
+  try {
+    args = parseRelayArgs(argv);
+  } catch (err) {
+    console.error(`[Pixel Agents] ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+  const relay = await startRelayServer({ host: args.host, port: args.port, verbose: true });
+  console.log(`\n  Pixel Agents relay listening on ws://${args.host}:${relay.port}/\n`);
+  const shutdown = () => {
+    void relay.close().finally(() => process.exit(0));
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
+
 async function main(): Promise<void> {
+  if (process.argv[2] === 'relay') {
+    await runRelay(process.argv.slice(3));
+    return;
+  }
   let args: CliArgs;
   try {
     args = parseArgs(process.argv.slice(2));
@@ -144,6 +239,12 @@ async function main(): Promise<void> {
   try {
     // Create runtime first (before server.start, so we can pass it in)
     const runtime = new AgentRuntime(store, claudeProvider);
+
+    // Multiplayer: publish this office's agents to a relay, draw the room's.
+    const multiplayerSettings = resolveMultiplayerSettings(args);
+    const multiplayer = multiplayerSettings
+      ? new MultiplayerClient(store, multiplayerSettings, claudeProvider.readingTools)
+      : undefined;
 
     // Wire hook events: HTTP POST -> runtime -> hookEventHandler -> agents
     server.onHookEvent((providerId, event) => {
@@ -237,7 +338,23 @@ async function main(): Promise<void> {
       assetCache,
       onSetHooksEnabled,
       onReloadAssets,
+      multiplayer,
+      // --relay names a distinct office, so it gets its own server (and page). Reusing a running one would open
+      // THAT office, while this process published agents nobody could see.
+      reuseExisting: !args.relay,
     });
+    if (multiplayer && multiplayerSettings) {
+      if (server.isOwner()) {
+        console.log(`[Pixel Agents] Multiplayer: joining ${multiplayerSettings.relayUrl}`);
+        multiplayer.start();
+      } else {
+        // The running server owns the office on screen; it joins the room itself when configured to.
+        console.log(
+          '[Pixel Agents] Multiplayer: reusing a running server, so it is that server that joins the room (or not). Pass --relay to start a separate office.',
+        );
+        multiplayer.dispose();
+      }
+    }
     currentConfig = { port: config.port, token: config.token };
 
     // Sync runtime refs with persisted settings BEFORE first scan tick. The
@@ -309,6 +426,7 @@ async function main(): Promise<void> {
     // ── Graceful shutdown ──
     function shutdown(): void {
       console.log('\nShutting down...');
+      multiplayer?.dispose();
       runtime.dispose();
       server.stop();
       process.exit(0);

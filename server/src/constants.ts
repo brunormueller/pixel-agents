@@ -96,6 +96,8 @@ export const LAYOUT_FILE_NAME = 'layout.json';
 export const LAYOUT_FILE_POLL_INTERVAL_MS = 2000;
 export const LAYOUT_REVISION_KEY = 'layoutRevision';
 export const CONFIG_FILE_NAME = 'config.json';
+/** Multiplayer relay settings, hand-written (see getMultiplayerSettings). */
+export const MULTIPLAYER_FILE_NAME = 'multiplayer.json';
 
 // ── Avatar Customization ────────────────────────────────────
 /** Number of pre-colored bundled character palettes (char_0.png–char_5.png).
@@ -107,3 +109,30 @@ export const PALETTE_COUNT = 6;
  *  clientMessageHandler to guard saveAgentSeats payloads from a remote or
  *  hand-edited source corrupting the stored values with out-of-range values. */
 export const HUE_SHIFT_MAX_DEG = 360;
+
+// ── Multiplayer (relay sync of agent state between offices) ─
+/** Relay wire-protocol version. Bump on breaking changes to the relay frames. */
+export const MULTIPLAYER_PROTOCOL_VERSION = 1;
+/** Default port for `pixel-agents relay`. */
+export const MULTIPLAYER_RELAY_DEFAULT_PORT = 4100;
+/** Largest relay frame accepted, in bytes — a full snapshot is a few hundred. */
+export const MULTIPLAYER_MAX_FRAME_BYTES = 16_384;
+/** Peers allowed in one room; the relay refuses the next join. */
+export const MULTIPLAYER_MAX_PEERS_PER_ROOM = 32;
+/** Agents published per peer; extras are dropped, never relayed. */
+export const MULTIPLAYER_MAX_AGENTS_PER_PEER = 32;
+/** Longest display name / room name kept after sanitizing. */
+export const MULTIPLAYER_MAX_NAME_LENGTH = 32;
+export const MULTIPLAYER_MAX_ROOM_LENGTH = 64;
+/** Coalesce bursts of local state changes into one publish. */
+export const MULTIPLAYER_PUBLISH_DEBOUNCE_MS = 150;
+/** Relay: state frames allowed per peer per second before frames are dropped. */
+export const MULTIPLAYER_MAX_FRAMES_PER_SEC = 20;
+/** Relay: ping interval; a peer that misses one pong is dropped. */
+export const MULTIPLAYER_HEARTBEAT_MS = 30_000;
+/** Client reconnect backoff (doubles from min up to max). */
+export const MULTIPLAYER_RECONNECT_MIN_MS = 1_000;
+export const MULTIPLAYER_RECONNECT_MAX_MS = 30_000;
+/** WebSocket close codes the relay uses (application range). */
+export const MULTIPLAYER_CLOSE_BAD_HELLO = 4400;
+export const MULTIPLAYER_CLOSE_ROOM_FULL = 4409;

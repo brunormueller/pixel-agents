@@ -25,6 +25,7 @@ export type ServerMessage =
   | SubagentToolPermission
   | AgentTeamInfo
   | AgentContextUsage
+  | RemotePeers
   | LayoutLoaded
   | FurnitureAssetsLoaded
   | CharacterSpritesLoaded
@@ -187,6 +188,29 @@ export interface AgentContextUsage {
   contextTokens: number;
   maxContextTokens: number;
 }
+
+export interface RemotePeers {
+  type: 'remotePeers';
+  peers: RemotePeer[];
+}
+
+export interface RemotePeer {
+  peerId: string;
+  name: string;
+  agents: RemoteAgent[];
+}
+
+export interface RemoteAgent {
+  id: number;
+  palette: number;
+  hueShift: number;
+  status: AgentActivityStatus;
+  activity: RemoteActivity | null;
+  permission: boolean;
+  awaitingInput: boolean;
+}
+
+export type RemoteActivity = 'typing' | 'reading';
 
 export interface LayoutLoaded {
   type: 'layoutLoaded';

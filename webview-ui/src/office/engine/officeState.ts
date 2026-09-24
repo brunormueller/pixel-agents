@@ -416,7 +416,7 @@ export class OfficeState {
     const paletteCount = getLoadedCharacterCount();
     const counts = new Array(paletteCount).fill(0) as number[];
     for (const ch of this.characters.values()) {
-      if (ch.isSubagent) continue;
+      if (ch.isSubagent || ch.isRemote) continue;
       if (ch.palette < paletteCount) counts[ch.palette]++;
     }
     return pickDiversePalette(paletteCount, counts);
@@ -1072,6 +1072,14 @@ export class OfficeState {
     }
   }
 
+  /** Mark a character as another office's agent (multiplayer). */
+  setRemote(id: number, peerName: string): void {
+    const ch = this.characters.get(id);
+    if (!ch) return;
+    ch.isRemote = true;
+    ch.remotePeerName = peerName;
+  }
+
   /** Mark an agent as headless (adopted, no terminal to focus). */
   setHeadless(id: number, headless: boolean): void {
     const ch = this.characters.get(id);
@@ -1153,7 +1161,7 @@ export class OfficeState {
   > {
     const seats: Record<number, { palette: number; hueShift: number; seatId: string | null }> = {};
     for (const ch of this.characters.values()) {
-      if (ch.isSubagent) continue;
+      if (ch.isSubagent || ch.isRemote) continue;
       seats[ch.id] = { palette: ch.palette, hueShift: ch.hueShift, seatId: ch.seatId };
     }
     return seats;

@@ -2,7 +2,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { CONFIG_FILE_NAME, LAYOUT_FILE_DIR } from './constants.js';
+import { CONFIG_FILE_NAME, LAYOUT_FILE_DIR, MULTIPLAYER_FILE_NAME } from './constants.js';
+import type { MultiplayerSettings } from './multiplayer/multiplayerClient.js';
 
 export interface AdapterSettings {
   soundEnabled: boolean;
@@ -180,6 +181,49 @@ export function readConfig(): PixelAgentsConfig {
       hooksConsent: {},
       hooksEnabled: {},
     };
+  }
+}
+
+/** Coerce the hand-written multiplayer.json. The URL must be ws:// or wss:// and the room non-empty; anything else
+ *  reads as "multiplayer off" rather than a half-configured connection. */
+export function parseMultiplayer(raw: unknown): MultiplayerSettings | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const { relayUrl, room, displayName } = raw as Record<string, unknown>;
+  if (typeof relayUrl !== 'string' || !/^wss?:\/\//i.test(relayUrl)) return undefined;
+  if (typeof room !== 'string' || room.trim() === '') return undefined;
+  return {
+    relayUrl,
+    room,
+    displayName:
+      typeof displayName === 'string' && displayName.trim() !== '' ? displayName : 'Guest',
+  };
+}
+
+/**
+ * The relay to join, from `~/.pixel-agents/multiplayer.json`, or undefined when that file is absent or invalid
+ * (multiplayer off). A file of its own rather than a config.json key: every build — including released ones that
+ * predate multiplayer — rewrites config.json from the fields it knows, so a key there is silently dropped by the
+ * next write of an older extension running in another window.
+ */
+export function getMultiplayerSettings(): MultiplayerSettings | undefined {
+  const filePath = path.join(os.homedir(), LAYOUT_FILE_DIR, MULTIPLAYER_FILE_NAME);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return undefined; // no file = multiplayer off
+  }
+  try {
+    const settings = parseMultiplayer(JSON.parse(raw));
+    if (!settings) {
+      console.warn(
+        `[Pixel Agents] Multiplayer: ignoring ${filePath} (needs "relayUrl" starting with ws:// or wss:// and a "room")`,
+      );
+    }
+    return settings;
+  } catch (err) {
+    console.warn(`[Pixel Agents] Multiplayer: ${filePath} is not valid JSON: ${err}`);
+    return undefined;
   }
 }
 

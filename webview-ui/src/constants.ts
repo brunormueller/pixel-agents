@@ -312,3 +312,11 @@ export const PET_THUMB_SCALE_MARGIN = 0.85;
 export const EMPTY_SPRITE_THUMBNAIL_BG = '#333';
 /** Maximum string length for a PlacedPet.id (defends against pathologically-long layout entries). */
 export const MAX_PET_ID_LENGTH = 128;
+
+// ── Multiplayer (other offices' agents) ─────────────────────
+/** First id handed to a remote character; later ones count down from here.
+ *  Far below the sub-agent range (-1 down) and far above GREETER_ID. */
+export const REMOTE_AGENT_ID_BASE = -1_000_000;
+/** Tool name a remote character carries while typing. Only the character FSM
+ *  reads it (anything outside the provider's readingTools animates as typing). */
+export const REMOTE_TYPING_TOOL_NAME = 'remote:typing';

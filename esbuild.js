@@ -138,7 +138,7 @@ async function buildCli() {
     sourcemap: !production,
     platform: 'node',
     outfile: 'dist/cli.js',
-    external: ['fastify', '@fastify/websocket', '@fastify/static', '@fastify/cors'],
+    external: ['fastify', '@fastify/websocket', '@fastify/static', '@fastify/cors', 'ws'],
     define: versionDefine,
     logLevel: 'silent',
   });

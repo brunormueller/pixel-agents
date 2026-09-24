@@ -29,6 +29,7 @@ import { loadAllCharacters, loadAllFurniture, loadAllPets } from '../../server/s
 import {
   getHooksConsent,
   getHooksEnabled,
+  getMultiplayerSettings,
   grantHooksConsent,
   readConfig,
   setHooksEnabled as persistHooksEnabled,
@@ -41,6 +42,7 @@ import {
   watchLayoutFile,
   writeLayoutToFile,
 } from '../../server/src/layoutPersistence.js';
+import { MultiplayerClient } from '../../server/src/multiplayer/multiplayerClient.js';
 import { PathSet } from '../../server/src/pathKey.js';
 import type { ConsentEffects } from '../../server/src/providers/hook/consentExecutor.js';
 import { applyConsentChoice } from '../../server/src/providers/hook/consentExecutor.js';
@@ -108,6 +110,9 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
 
   // Pixel Agents Server (hook event reception)
   private pixelAgentsServer: PixelAgentsServer | null = null;
+
+  // Multiplayer relay client (only when config.json has a valid `multiplayer` block)
+  private multiplayer: MultiplayerClient | null = null;
   private adapter: StateAdapter;
 
   // Auto-spawn guard: ensures the startup spawn fires at most once per VS Code
@@ -180,6 +185,17 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
 
     // Create shared runtime (owns timer Maps, scanners, hook handler, dismissal tracker)
     this.runtime = new AgentRuntime(this.store, claudeProvider);
+
+    const multiplayerSettings = getMultiplayerSettings();
+    if (multiplayerSettings) {
+      console.log(`[Pixel Agents] Multiplayer: joining ${multiplayerSettings.relayUrl}`);
+      this.multiplayer = new MultiplayerClient(
+        this.store,
+        multiplayerSettings,
+        claudeProvider.readingTools,
+      );
+      this.multiplayer.start();
+    }
 
     this.initServer();
   }
@@ -762,6 +778,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
                 sendLayout(this.webview, this.defaultLayout);
                 // Send agent statuses AFTER layoutLoaded so characters exist when messages arrive
                 sendCurrentAgentStatuses(this.store, this.webview);
+                this.multiplayer?.resend((m) => void this.webview?.postMessage(m));
                 this.startLayoutWatcher();
               }
               return;
@@ -826,6 +843,8 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
             sendLayout(this.webview, this.defaultLayout);
             // Send agent statuses AFTER layoutLoaded so characters exist when messages arrive
             sendCurrentAgentStatuses(this.store, this.webview);
+            // Other people's agents (multiplayer), once their seats exist.
+            this.multiplayer?.resend((m) => void this.webview?.postMessage(m));
             this.startLayoutWatcher();
           }
         })();
@@ -1038,6 +1057,8 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
   }
 
   dispose() {
+    this.multiplayer?.dispose();
+    this.multiplayer = null;
     this.pixelAgentsServer?.stop();
     this.pixelAgentsServer = null;
     this.runtime.dispose();

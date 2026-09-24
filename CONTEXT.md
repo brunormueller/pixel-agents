@@ -214,3 +214,21 @@ _Avoid_: connection, socket
 **Protocol**:
 The message contract between the office UI and the runtime, shared by every adapter and defined in a single source of truth.
 _Avoid_: API
+
+## Multiplayer
+
+**Room**:
+The set of offices that see each other's agents. Joining one is opt-in and machine-wide; its name is the only access control, so it is treated like a password.
+_Avoid_: channel, lobby, server
+
+**Peer**:
+One office in a room — a VS Code window or a Standalone server. Each peer publishes a summary of its own agents and draws everyone else's.
+_Avoid_: client, player, user (a person may run several peers)
+
+**Relay**:
+The small fan-out service peers connect to. It forwards each peer's summary to the rest of its room and keeps nothing once a peer leaves. It is not the Runtime and never sees a transcript.
+_Avoid_: multiplayer server, hub
+
+**Remote agent**:
+Another peer's agent, drawn as a character in this office. Only its coarse status travels — active or idle, typing or reading, needs approval — never tool names, arguments, prompts or folder names. It takes a free seat in the local layout (layouts are per office, so positions never travel), cannot be focused and is never persisted.
+_Avoid_: guest agent, foreign agent, online agent

@@ -5,7 +5,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 
-import { CliArgsError, parseArgs } from '../src/cli.js';
+import { CliArgsError, parseArgs, parseRelayArgs } from '../src/cli.js';
+import { MULTIPLAYER_RELAY_DEFAULT_PORT } from '../src/constants.js';
 import { CLAUDE_HOOK_EVENTS } from '../src/providers/hook/claude/constants.js';
 
 const CLI_BUNDLE = path.join(__dirname, '../../dist/cli.js');
@@ -118,6 +119,40 @@ describe('parseArgs', () => {
   // 10. --host is parsed independently of --port
   it('parses --host', () => {
     expect(parseArgs(['--host', '0.0.0.0']).host).toBe('0.0.0.0');
+  });
+
+  // 11. Multiplayer flags
+  it('parses --relay, --room and --name', () => {
+    expect(
+      parseArgs(['--relay', 'wss://relay.example', '--room', 'r1', '--name', 'Ana']),
+    ).toMatchObject({ relay: 'wss://relay.example', room: 'r1', name: 'Ana' });
+  });
+
+  it('rejects a --relay that is not a ws:// or wss:// URL', () => {
+    expect(() => parseArgs(['--relay', 'http://relay.example', '--room', 'r'])).toThrow(
+      /ws:\/\/ or wss:\/\//,
+    );
+  });
+
+  it('rejects --relay without --room', () => {
+    expect(() => parseArgs(['--relay', 'ws://relay.example'])).toThrow(/needs --room/);
+  });
+
+  it('rejects a multiplayer flag whose value is another flag', () => {
+    expect(() => parseArgs(['--room', '--name', 'x'])).toThrow(/Missing value for --room/);
+  });
+});
+
+describe('parseRelayArgs', () => {
+  it('defaults to the relay port on loopback', () => {
+    expect(parseRelayArgs([])).toEqual({ port: MULTIPLAYER_RELAY_DEFAULT_PORT, host: '127.0.0.1' });
+  });
+
+  it('parses --port and --host', () => {
+    expect(parseRelayArgs(['--port', '5000', '--host', '0.0.0.0'])).toEqual({
+      port: 5000,
+      host: '0.0.0.0',
+    });
   });
 });
 

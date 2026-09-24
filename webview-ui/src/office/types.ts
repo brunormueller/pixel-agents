@@ -233,6 +233,11 @@ export interface Character {
    *  per-consumer guard reads this flag. It exists for the render/e2e snapshot
    *  (testHooks.getCharacters) to tell the greeter from agents. */
   isGreeter?: boolean;
+  /** Another office's agent (multiplayer): simulated here from relayed state,
+   *  never persisted, never focusable — there is no terminal on this machine. */
+  isRemote?: boolean;
+  /** Display name of the office a remote character belongs to. */
+  remotePeerName?: string;
 
   // -- Agent Teams --
   /** Team name this agent belongs to */

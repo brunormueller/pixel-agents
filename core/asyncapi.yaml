@@ -100,6 +100,8 @@ components:
         - $ref: '#/components/schemas/AgentTeamInfo'
         # Context window
         - $ref: '#/components/schemas/AgentContextUsage'
+        # Multiplayer
+        - $ref: '#/components/schemas/RemotePeers'
         # Layout
         - $ref: '#/components/schemas/LayoutLoaded'
         # Assets
@@ -441,6 +443,71 @@ components:
           type: integer
         maxContextTokens:
           type: integer
+
+    RemotePeers:
+      description: |
+        Multiplayer snapshot: every OTHER office in the relay room and its agents.
+        Always the full picture (a peer missing from the list has left), so the
+        client reconciles rather than applies deltas. Empty when multiplayer is
+        off or the relay connection dropped. Remote agent ids are only unique
+        within their peer — key characters by (peerId, id).
+      type: object
+      additionalProperties: false
+      required: [type, peers]
+      properties:
+        type:
+          const: remotePeers
+        peers:
+          type: array
+          items:
+            $ref: '#/components/schemas/RemotePeer'
+
+    RemoteActivity:
+      description: Which animation a remote agent's current tool plays.
+      type: string
+      enum: [typing, reading]
+
+    RemotePeer:
+      description: One other office in the multiplayer room.
+      type: object
+      additionalProperties: false
+      required: [peerId, name, agents]
+      properties:
+        peerId:
+          type: string
+        name:
+          type: string
+          description: Display name the peer chose (sanitized, at most 32 characters).
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/RemoteAgent'
+
+    RemoteAgent:
+      description: |
+        An agent of another office, reduced to what animates its character. Tool
+        names, arguments, status text and folder names are never shared.
+      type: object
+      additionalProperties: false
+      required: [id, palette, hueShift, status, activity, permission, awaitingInput]
+      properties:
+        id:
+          type: integer
+        palette:
+          type: integer
+        hueShift:
+          type: integer
+        status:
+          $ref: '#/components/schemas/AgentActivityStatus'
+        activity:
+          description: Animation of the tool in flight; null between tools.
+          oneOf:
+            - $ref: '#/components/schemas/RemoteActivity'
+            - type: 'null'
+        permission:
+          type: boolean
+        awaitingInput:
+          type: boolean
 
     LayoutLoaded:
       description: |

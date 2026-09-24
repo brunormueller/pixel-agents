@@ -19,6 +19,7 @@ import {
 } from '../../constants.js';
 import type { SubagentCharacter } from '../../hooks/useExtensionMessages.js';
 import type { OfficeState } from '../engine/officeState.js';
+import type { RemoteCharacter } from '../engine/remoteAgents.js';
 import { overlayProjection } from '../projection.js';
 import type { ToolActivity } from '../types.js';
 import { CharacterState } from '../types.js';
@@ -35,6 +36,8 @@ interface ToolOverlayProps {
   agentTools: Record<number, ToolActivity[]>;
   subagentTools: Record<number, Record<string, ToolActivity[]>>;
   subagentCharacters: SubagentCharacter[];
+  /** Other offices' agents (multiplayer). */
+  remoteCharacters: RemoteCharacter[];
   containerRef: React.RefObject<HTMLDivElement | null>;
   zoom: number;
   panRef: React.RefObject<{ x: number; y: number }>;
@@ -74,6 +77,17 @@ function getActivityText(
   return 'Idle';
 }
 
+/** Activity text for another office's agent: only its coarse state is shared. */
+function getRemoteActivityText(remote: RemoteCharacter): string {
+  if (remote.permission) return 'Needs approval';
+  if (remote.status === 'waiting') {
+    return remote.awaitingInput ? WAITING_INPUT_ACTIVITY_TEXT : 'Idle';
+  }
+  if (remote.activity === 'reading') return 'Reading';
+  if (remote.activity === 'typing') return 'Working';
+  return 'Thinking';
+}
+
 function getFuelColor(ratio: number): string {
   if (ratio >= CONTEXT_CRITICAL_THRESHOLD) return CONTEXT_GAUGE_COLOR_CRITICAL;
   if (ratio >= CONTEXT_DANGER_THRESHOLD) return CONTEXT_GAUGE_COLOR_DANGER;
@@ -87,6 +101,7 @@ export function ToolOverlay({
   agentTools,
   subagentTools,
   subagentCharacters,
+  remoteCharacters,
   containerRef,
   zoom,
   panRef,
@@ -118,7 +133,8 @@ export function ToolOverlay({
   const hoveredId = officeState.hoveredAgentId;
 
   // All character IDs
-  const allIds = [...agents, ...subagentCharacters.map((s) => s.id)];
+  const remoteById = new Map(remoteCharacters.map((r) => [r.id, r]));
+  const allIds = [...agents, ...subagentCharacters.map((s) => s.id), ...remoteById.keys()];
 
   return (
     <>
@@ -129,6 +145,7 @@ export function ToolOverlay({
         const isSelected = selectedId === id;
         const isHovered = hoveredId === id;
         const isSub = ch.isSubagent;
+        const remote = remoteById.get(id);
 
         // Only show for hovered or selected agents (unless always-show is on)
         if (!alwaysShowOverlay && !isSelected && !isHovered) return null;
@@ -161,7 +178,9 @@ export function ToolOverlay({
         const hasWaitingBubble = ch.bubbleType === 'waiting';
         const subHasPermission = isSub && ch.bubbleType === 'permission';
         let activityText: string;
-        if (hasWaitingBubble && ch.waitingAwaitingInput) {
+        if (remote) {
+          activityText = getRemoteActivityText(remote);
+        } else if (hasWaitingBubble && ch.waitingAwaitingInput) {
           // Idle, waiting on the user -> dedicated label. A finished turn (Stop)
           // shows only the checkmark and falls through to the normal idle text.
           activityText = WAITING_INPUT_ACTIVITY_TEXT;
@@ -189,8 +208,9 @@ export function ToolOverlay({
 
         // Determine dot color
         const tools = agentTools[id];
-        const hasPermission = subHasPermission || tools?.some((t) => t.permissionWait && !t.done);
-        const hasActiveTools = tools?.some((t) => !t.done);
+        const hasPermission =
+          subHasPermission || remote?.permission || tools?.some((t) => t.permissionWait && !t.done);
+        const hasActiveTools = remote ? remote.activity !== null : tools?.some((t) => !t.done);
         const isActive = ch.isActive;
         const hasWaiting = ch.bubbleType === 'waiting';
 
@@ -202,7 +222,12 @@ export function ToolOverlay({
         }
 
         // Team info
-        const teamRoleLabel = ch.isTeamLead ? 'LEAD' : ch.agentName || null;
+        // A remote character is labelled with the office it belongs to.
+        const teamRoleLabel = remote
+          ? remote.peerName
+          : ch.isTeamLead
+            ? 'LEAD'
+            : ch.agentName || null;
         const hasExtraLines = !!(ch.folderName || teamRoleLabel);
 
         // Context gauge. Every agent gets one — lead, teammate, adopted,
@@ -260,7 +285,7 @@ export function ToolOverlay({
                   </span>
                 )}
               </div>
-              {isSelected && !isSub && (
+              {isSelected && !isSub && !remote && (
                 <Button
                   variant="ghost"
                   size="icon"

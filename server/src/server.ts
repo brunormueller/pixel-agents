@@ -18,6 +18,7 @@ import {
   SERVERS_DIR,
 } from './constants.js';
 import { createHttpServer } from './httpServer.js';
+import type { MultiplayerClient } from './multiplayer/multiplayerClient.js';
 import type { ServerConfig } from './serverConfig.js';
 import { isServerConfig, isServerTarget } from './serverConfig.js';
 
@@ -69,6 +70,10 @@ export class PixelAgentsServer {
     assetCache?: AssetCache;
     onSetHooksEnabled?: SetHooksEnabledSideEffect;
     onReloadAssets?: ReloadAssetsSideEffect;
+    multiplayer?: MultiplayerClient;
+    /** false = always start our own server, even when a compatible one is running. A multiplayer office needs its
+     *  own: reusing another's would show that office's agents under this one's page. Default true. */
+    reuseExisting?: boolean;
   }): Promise<ServerConfig> {
     const embedded = options?.embedded ?? true;
     const wantsSpa = !embedded;
@@ -80,7 +85,8 @@ export class PixelAgentsServer {
     // server (blank page). Prune dead entries first so a crashed server's
     // stale file never blocks discovery of a live one.
     const registry = this.readAndPruneRegistry();
-    const candidate = registry.find((e) => e.servesSpa === wantsSpa);
+    const candidate =
+      options?.reuseExisting === false ? undefined : registry.find((e) => e.servesSpa === wantsSpa);
     if (candidate) {
       this.config = candidate;
       this.ownsServer = false;
@@ -106,6 +112,7 @@ export class PixelAgentsServer {
       onHookEvent: (providerId, event) => this.callback?.(providerId, event),
       onSetHooksEnabled: options?.onSetHooksEnabled,
       onReloadAssets: options?.onReloadAssets,
+      multiplayer: options?.multiplayer,
     });
 
     this.app = app;
@@ -144,6 +151,11 @@ export class PixelAgentsServer {
     }
     this.config = null;
     this.ownsServer = false;
+  }
+
+  /** True when this process started the server (false after reusing another instance's). */
+  isOwner(): boolean {
+    return this.ownsServer;
   }
 
   /** Returns the current server config, or null if not started. */
