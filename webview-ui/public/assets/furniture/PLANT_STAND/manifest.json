@@ -1,0 +1,13 @@
+{
+  "id": "PLANT_STAND",
+  "name": "Plant on a stand",
+  "category": "decor",
+  "canPlaceOnWalls": false,
+  "canPlaceOnSurfaces": false,
+  "type": "asset",
+  "width": 16,
+  "height": 32,
+  "footprintW": 1,
+  "footprintH": 2,
+  "backgroundTiles": 1
+}

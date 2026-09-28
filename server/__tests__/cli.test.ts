@@ -134,8 +134,10 @@ describe('parseArgs', () => {
     );
   });
 
-  it('rejects --relay without --room', () => {
-    expect(() => parseArgs(['--relay', 'ws://relay.example'])).toThrow(/needs --room/);
+  it('accepts --relay without --room (the page asks for the room)', () => {
+    expect(parseArgs(['--relay', 'ws://relay.example'])).toMatchObject({
+      relay: 'ws://relay.example',
+    });
   });
 
   it('rejects a multiplayer flag whose value is another flag', () => {
@@ -153,6 +155,15 @@ describe('parseRelayArgs', () => {
       port: 5000,
       host: '0.0.0.0',
     });
+  });
+
+  it('keeps room maps in --rooms-dir, or nowhere with --no-save-rooms', () => {
+    expect(parseRelayArgs(['--rooms-dir', '/srv/rooms']).roomsDir).toBe('/srv/rooms');
+    expect(parseRelayArgs(['--no-save-rooms']).saveRooms).toBe(false);
+    expect(() => parseRelayArgs(['--rooms-dir', '/srv/rooms', '--no-save-rooms'])).toThrow(
+      CliArgsError,
+    );
+    expect(() => parseRelayArgs(['--rooms-dir'])).toThrow(CliArgsError);
   });
 });
 

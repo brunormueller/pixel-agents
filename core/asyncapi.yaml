@@ -102,6 +102,22 @@ components:
         - $ref: '#/components/schemas/AgentContextUsage'
         # Multiplayer
         - $ref: '#/components/schemas/RemotePeers'
+        - $ref: '#/components/schemas/ChatMessage'
+        - $ref: '#/components/schemas/ChatHistory'
+        - $ref: '#/components/schemas/MultiplayerStatus'
+        - $ref: '#/components/schemas/RoomLayout'
+        - $ref: '#/components/schemas/RoomLayoutRejected'
+        - $ref: '#/components/schemas/ProfileLoaded'
+        # Meetings (video calls inside the room)
+        - $ref: '#/components/schemas/MeetingSignal'
+        - $ref: '#/components/schemas/MeetingEvent'
+        - $ref: '#/components/schemas/MeetingNotesResult'
+        # Integrations (calendar, music)
+        - $ref: '#/components/schemas/CalendarState'
+        - $ref: '#/components/schemas/SpotifyStatus'
+        - $ref: '#/components/schemas/OpenExternalUrl'
+        # Web view (a VS Code window opened in a browser)
+        - $ref: '#/components/schemas/OfficeInBrowser'
         # Layout
         - $ref: '#/components/schemas/LayoutLoaded'
         # Assets
@@ -146,6 +162,20 @@ components:
         - $ref: '#/components/schemas/SaveAreaMappings'
         - $ref: '#/components/schemas/SetShowAreas'
         - $ref: '#/components/schemas/RequestDiagnostics'
+        - $ref: '#/components/schemas/SendChat'
+        - $ref: '#/components/schemas/JoinRoom'
+        - $ref: '#/components/schemas/LeaveRoom'
+        - $ref: '#/components/schemas/PresenceUpdate'
+        - $ref: '#/components/schemas/SaveRoomLayout'
+        - $ref: '#/components/schemas/UpdateProfile'
+        - $ref: '#/components/schemas/ConfigureCalendar'
+        - $ref: '#/components/schemas/SpotifyCommand'
+        - $ref: '#/components/schemas/OpenExternal'
+        - $ref: '#/components/schemas/CopyWebLink'
+        - $ref: '#/components/schemas/UpdateMeetingPresence'
+        - $ref: '#/components/schemas/SendMeetingSignal'
+        - $ref: '#/components/schemas/SendMeetingEvent'
+        - $ref: '#/components/schemas/GenerateMeetingNotes'
       discriminator: type
 
     # ── Server message variants ────────────────────────────────────
@@ -482,6 +512,177 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RemoteAgent'
+        desk:
+          description: Seat uid of the room layout this office claimed as its desk; null when none.
+          oneOf:
+            - type: string
+            - type: 'null'
+        since:
+          type: integer
+          description: |
+            Relay clock when the office joined, ms since epoch. Two offices
+            claiming the same desk: the earlier `since` keeps it.
+        profile:
+          $ref: '#/components/schemas/PeerProfile'
+        meeting:
+          $ref: '#/components/schemas/MeetingPresence'
+
+    PeerProfile:
+      description: |
+        What the person in an office chose to show the room about themselves:
+        how their character looks, a status, the decoration on their desk and —
+        only while they turned sharing on — the song they are listening to.
+        Sanitized by the relay and again by every office that receives it.
+      type: object
+      additionalProperties: false
+      properties:
+        look:
+          $ref: '#/components/schemas/AvatarLook'
+        status:
+          $ref: '#/components/schemas/PersonStatus'
+        statusText:
+          type: string
+          description: Custom status message (control and bidi characters stripped, at most 60 characters).
+        music:
+          description: What the person is listening to; absent/null = nothing shared.
+          oneOf:
+            - $ref: '#/components/schemas/SharedTrack'
+            - type: 'null'
+        decor:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeskDecorItem'
+        deskStyle:
+          type: string
+          description: Style the person's desk and chair are drawn in (a desk style id, e.g. CURVED_DESK), instead of the room's.
+        hidden:
+          type: array
+          description: Uids of room-layout items standing on the person's desk that they took off (the computer it came with).
+          items:
+            type: string
+
+    AvatarLook:
+      description: |
+        The person's character. `body` picks the base sprite (skin, hair style,
+        cut of the clothes); `hair`, `top` and `bottom` index the webview's color
+        swatches, -1 keeping the sprite's own colors; `accessory` is drawn over
+        the head.
+      type: object
+      additionalProperties: false
+      required: [body, hair, top, bottom, accessory]
+      properties:
+        body:
+          type: integer
+        hair:
+          type: integer
+        top:
+          type: integer
+        bottom:
+          type: integer
+        accessory:
+          $ref: '#/components/schemas/AvatarAccessory'
+
+    AvatarAccessory:
+      type: string
+      enum:
+        [
+          none,
+          cap,
+          beanie,
+          tophat,
+          crown,
+          partyhat,
+          headphones,
+          glasses,
+          sunglasses,
+          flower,
+          bow,
+          halo,
+        ]
+
+    PersonStatus:
+      description: |
+        available/busy/away are chosen by the person; meeting is also set on its
+        own while a calendar event is in progress (when the calendar is allowed to).
+      type: string
+      enum: [available, busy, meeting, away]
+
+    SharedTrack:
+      description: A song, as the room sees it. `trackUrl` is only ever an open.spotify.com track link.
+      type: object
+      additionalProperties: false
+      required: [title, artist]
+      properties:
+        title:
+          type: string
+        artist:
+          type: string
+        trackUrl:
+          type: string
+
+    DeskDecorItem:
+      description: |
+        A decoration on the person's desk: a furniture catalog id (a rotation
+        variant, so it faces the chair), placed relative to the desk's chair so it
+        moves along with the desk: `dc,dr` tiles (at most 3 away) plus, for items
+        standing on the tabletop, `px,py` pixels within that tile — the middle of
+        the item's base.
+      type: object
+      additionalProperties: false
+      required: [type, dc, dr]
+      properties:
+        type:
+          type: string
+        dc:
+          type: integer
+        dr:
+          type: integer
+        px:
+          type: integer
+          description: 0-15.
+        py:
+          type: integer
+          description: 0-15.
+
+    RemotePose:
+      description: |
+        Where a character stands in the SHARED room layout, and what it is doing.
+        Only sent while the room has a shared layout — with per-office layouts a
+        position would mean nothing on the other side.
+      type: object
+      additionalProperties: false
+      required: [x, y, dir, state]
+      properties:
+        x:
+          type: number
+          description: World pixels.
+        y:
+          type: number
+        dir:
+          type: integer
+          description: 0 down, 1 left, 2 right, 3 up.
+        state:
+          $ref: '#/components/schemas/RemotePoseState'
+        emote:
+          description: Animation or reaction the character is showing; absent/null = none.
+          oneOf:
+            - $ref: '#/components/schemas/RemoteEmote'
+            - type: 'null'
+        emoteSeq:
+          type: integer
+          description: Bumped on every new emote, so the same one twice in a row replays.
+
+    RemoteEmote:
+      description: |
+        dance/jump/spin move the character (dance loops until stopped); the rest
+        are reactions, an emoji floating up from its head.
+      type: string
+      enum: [dance, jump, spin, wave, heart, clap, laugh, party]
+
+    RemotePoseState:
+      description: What the character's sprite is doing (read = the reading animation at a desk).
+      type: string
+      enum: [idle, walk, type, read]
 
     RemoteAgent:
       description: |
@@ -508,6 +709,595 @@ components:
           type: boolean
         awaitingInput:
           type: boolean
+        isAvatar:
+          type: boolean
+          description: |
+            The person's own character. The office's first Claude agent IS this
+            character, so it keeps one identity while agents come and go.
+        pose:
+          $ref: '#/components/schemas/RemotePose'
+
+    ChatEntry:
+      description: |
+        One line of the multiplayer room's chat. Text the person typed for the
+        room to read, sanitized by both the relay and the receiving office
+        (control and bidi characters stripped, at most 280 characters).
+      type: object
+      additionalProperties: false
+      required: [peerId, name, text, ts, self]
+      properties:
+        peerId:
+          type: string
+          description: Sender office; matches `RemotePeer.peerId` for other offices.
+        name:
+          type: string
+        text:
+          type: string
+        ts:
+          type: integer
+          description: Relay clock when the message was fanned out, ms since epoch.
+        self:
+          type: boolean
+          description: Sent by this office (the bubble goes over a local character).
+
+    ChatMessage:
+      description: |
+        A new chat line from the multiplayer room, this office's own included
+        (the relay echoes it back as the delivery receipt).
+      type: object
+      additionalProperties: false
+      required: [type, message]
+      properties:
+        type:
+          const: chatMessage
+        message:
+          $ref: '#/components/schemas/ChatEntry'
+
+    ChatHistory:
+      description: |
+        The chat lines this office received since it started (in memory only,
+        oldest first), replayed on `webviewReady`. Only sent when multiplayer is
+        configured, so its arrival is also what enables the chat UI.
+      type: object
+      additionalProperties: false
+      required: [type, messages]
+      properties:
+        type:
+          const: chatHistory
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatEntry'
+
+    MultiplayerStatus:
+      description: |
+        The office's place in multiplayer. `available` = the office can join a
+        room (always, today); `room`/`name`/`relayUrl` prefill the join screen
+        (the last ones used) even before joining. `layoutOwner` = this office created a
+        room that had no map, so the room starts with ITS layout (on an older
+        relay it also stays the only office that may edit the map).
+      type: object
+      additionalProperties: false
+      required: [type, available, joined, connected, room, name, relayUrl, layoutOwner]
+      properties:
+        type:
+          const: multiplayerStatus
+        available:
+          type: boolean
+        joined:
+          type: boolean
+        connected:
+          type: boolean
+        room:
+          type: string
+        name:
+          type: string
+        relayUrl:
+          type: string
+          description: |
+            The relay the join screen starts from: typed there last time, from
+            multiplayer.json, `--relay`, or the build's default. Empty = none
+            known, the join screen asks for it.
+        layoutOwner:
+          type: boolean
+        since:
+          type: integer
+          description: Relay clock when this office joined (compare with RemotePeer.since for a contested desk).
+        peerId:
+          type: string
+          description: This office's id in the room (the `from` other offices see on its meeting signals); empty while disconnected.
+        clockOffset:
+          type: integer
+          description: |
+            Relay clock minus this machine's clock, ms (estimated at join). Meeting
+            timestamps (join times, raised hands, the music's start) are relay
+            clock, so every office in a meeting orders and times them alike.
+        iceServers:
+          type: array
+          description: |
+            STUN/TURN servers for meeting media (WebRTC): the relay's, then the
+            ones in multiplayer.json. Empty = the webview's public STUN default.
+          items:
+            $ref: '#/components/schemas/IceServer'
+
+    RoomLayout:
+      description: |
+        The room's shared layout, shown INSTEAD of this office's own while joined
+        and never written to its layout.json. Null = no shared layout (not
+        joined, or none published yet): show your own layout. With `rev` the
+        map is everyone's: edits go out as `saveRoomLayout`, and every new
+        revision (anyone's, ours included) arrives as another `roomLayout`.
+      type: object
+      additionalProperties: false
+      required: [type, layout, editable]
+      properties:
+        type:
+          const: roomLayout
+        layout:
+          oneOf:
+            - type: object
+              description: Opaque OfficeLayout, sanitized by the relay and the office.
+            - type: 'null'
+        editable:
+          type: boolean
+          description: |
+            The layout editor may open: on this office's own layout, or on a room
+            map with `rev`. False = an older relay's room map, which only its
+            creator edits.
+        rev:
+          type: integer
+          description: Revision of the room map (present when anyone in the room may edit it).
+        editId:
+          type: string
+          description: The `saveRoomLayout` edit that made this revision, when one just landed.
+
+    RoomLayoutRejectReason:
+      description: |
+        `stale`: the map moved on first (the page merges the newer map in and
+        retries); `busy`: too many edits too fast; `replaced`: a newer edit from
+        this office superseded it before it was sent; `offline`: no relay
+        connection; `invalid`: not a layout the room accepts; `forbidden`: an
+        untokened page (standalone) may not edit the room.
+      type: string
+      enum: [stale, busy, replaced, offline, invalid, forbidden]
+
+    RoomLayoutRejected:
+      description: An edit of the room's map (`saveRoomLayout`) did not land.
+      type: object
+      additionalProperties: false
+      required: [type, editId, rev, reason]
+      properties:
+        type:
+          const: roomLayoutRejected
+        editId:
+          type: string
+        rev:
+          type: integer
+          description: The room map's revision as this office knows it.
+        reason:
+          $ref: '#/components/schemas/RoomLayoutRejectReason'
+
+    ProfileLoaded:
+      description: |
+        This office's own profile as saved in ~/.pixel-agents/multiplayer-profile.json:
+        the avatar look (null = none chosen yet), status, desk decoration and
+        whether the song playing is shared with the room. Sent on webviewReady
+        and after every `updateProfile`. Only when multiplayer is configured.
+      type: object
+      additionalProperties: false
+      required: [type, look, status, statusText, decor, shareMusic, desk, deskStyle, hidden]
+      properties:
+        type:
+          const: profileLoaded
+        desk:
+          description: The desk this office last claimed in the current room (a seat uid), to sit at again; null when none.
+          oneOf:
+            - type: string
+            - type: 'null'
+        look:
+          oneOf:
+            - $ref: '#/components/schemas/AvatarLook'
+            - type: 'null'
+        status:
+          $ref: '#/components/schemas/PersonStatus'
+        statusText:
+          type: string
+        decor:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeskDecorItem'
+        shareMusic:
+          type: boolean
+        deskStyle:
+          oneOf:
+            - type: string
+            - type: 'null'
+        hidden:
+          type: array
+          items:
+            type: string
+
+    IceServer:
+      description: One WebRTC ICE server (RTCIceServer).
+      type: object
+      additionalProperties: false
+      required: [urls]
+      properties:
+        urls:
+          type: array
+          items:
+            type: string
+          description: 'stun:, turn: or turns: URLs.'
+        username:
+          type: string
+        credential:
+          type: string
+
+    MeetingPresence:
+      description: |
+        This office's person in a meeting — a video call inside the room. Each
+        office publishes its own presence with its state frame; a meeting is
+        simply every office publishing the same `id`. Media never passes the
+        relay (browser to browser, WebRTC); this only says who is in the call
+        and what they are sending. `transcribe` and `music` are meeting-wide
+        switches every participant replicates: the newest `at` wins.
+      type: object
+      additionalProperties: false
+      required: [id, title, since, mic, cam, screens, hand, rec, captions]
+      properties:
+        id:
+          type: string
+          description: Meeting id (letters, digits, - and _; at most 64).
+        title:
+          type: string
+          description: At most 60 characters.
+        since:
+          type: integer
+          description: Relay clock when this person joined the call. Also names this join (a rejoin is a new connection).
+        mic:
+          type: boolean
+        cam:
+          type: boolean
+        stream:
+          type: string
+          description: Id of the MediaStream carrying the microphone and camera (WebRTC msid).
+        screens:
+          type: array
+          description: The screens this person shares, at most 4 at once.
+          items:
+            $ref: '#/components/schemas/MeetingScreen'
+        hand:
+          type: boolean
+        handAt:
+          type: integer
+          description: Relay clock when the hand went up (the order hands are taken in).
+        rec:
+          type: boolean
+          description: This person is recording the meeting (everyone sees it).
+        captions:
+          type: boolean
+          description: This person's speech is being transcribed for the meeting.
+        transcribe:
+          $ref: '#/components/schemas/MeetingSwitch'
+        music:
+          $ref: '#/components/schemas/MeetingMusic'
+
+    MeetingScreen:
+      type: object
+      additionalProperties: false
+      required: [stream]
+      properties:
+        stream:
+          type: string
+          description: MediaStream id of the shared screen.
+        label:
+          type: string
+        audio:
+          type: boolean
+          description: The share carries the screen's or tab's sound.
+
+    MeetingSwitch:
+      description: A meeting-wide on/off everyone replicates; the newest `at` wins.
+      type: object
+      additionalProperties: false
+      required: [on, at]
+      properties:
+        on:
+          type: boolean
+        at:
+          type: integer
+          description: Relay clock of the change.
+
+    MeetingMusic:
+      description: |
+        The meeting's soundtrack: a built-in track every participant plays
+        locally, `at` = relay clock when it started (so all hear the same
+        moment). An empty track = stopped. The newest `at` wins.
+      type: object
+      additionalProperties: false
+      required: [track, at]
+      properties:
+        track:
+          type: string
+        at:
+          type: integer
+
+    MeetingSdp:
+      type: object
+      additionalProperties: false
+      required: [type, sdp]
+      properties:
+        type:
+          $ref: '#/components/schemas/MeetingSdpType'
+        sdp:
+          type: string
+
+    MeetingSdpType:
+      type: string
+      enum: [offer, answer, pranswer, rollback]
+
+    MeetingIceCandidate:
+      type: object
+      additionalProperties: false
+      required: [candidate]
+      properties:
+        candidate:
+          type: string
+        sdpMid:
+          type: string
+        sdpMLineIndex:
+          type: integer
+        usernameFragment:
+          type: string
+
+    MeetingSignalKind:
+      type: string
+      enum: [sdp, ice, invite]
+
+    MeetingSignalData:
+      description: |
+        WebRTC signaling between two offices in the same meeting, or an invite.
+        `sid` names the sender's join (its MeetingPresence.since) and `tsid` the
+        receiver's, so a message meant for an earlier join is ignored.
+      type: object
+      additionalProperties: false
+      required: [kind, sid, tsid]
+      properties:
+        kind:
+          $ref: '#/components/schemas/MeetingSignalKind'
+        sid:
+          type: integer
+        tsid:
+          type: integer
+        description:
+          $ref: '#/components/schemas/MeetingSdp'
+        candidate:
+          $ref: '#/components/schemas/MeetingIceCandidate'
+        meetingId:
+          type: string
+          description: invite only.
+        title:
+          type: string
+          description: invite only.
+
+    MeetingSignal:
+      description: A WebRTC signal (or an invite) from another office, relayed to this one only.
+      type: object
+      additionalProperties: false
+      required: [type, from, data]
+      properties:
+        type:
+          const: meetingSignal
+        from:
+          type: string
+          description: Sender's peerId.
+        data:
+          $ref: '#/components/schemas/MeetingSignalData'
+
+    MeetingEventKind:
+      type: string
+      enum: [chat, reaction, caption, notes]
+
+    MeetingEventBody:
+      description: |
+        Something said in a meeting: a chat line, a reaction (an emoji from the
+        fixed set), a transcribed sentence, or meeting notes. The relay fans it
+        out to the meeting's participants only, the sender included.
+      type: object
+      additionalProperties: false
+      required: [kind, text]
+      properties:
+        kind:
+          $ref: '#/components/schemas/MeetingEventKind'
+        text:
+          type: string
+
+    MeetingEvent:
+      type: object
+      additionalProperties: false
+      required: [type, from, name, meetingId, ts, self, event]
+      properties:
+        type:
+          const: meetingEvent
+        from:
+          type: string
+        name:
+          type: string
+        meetingId:
+          type: string
+        ts:
+          type: integer
+          description: Relay clock when it was fanned out.
+        self:
+          type: boolean
+          description: Sent by this office (the relay's echo is the delivery receipt).
+        event:
+          $ref: '#/components/schemas/MeetingEventBody'
+
+    MeetingNotesResult:
+      description: |
+        The answer to `generateMeetingNotes`, to the client that asked. `text` is
+        markdown; `savedTo` is the file under ~/.pixel-agents/meetings/ holding
+        the notes and the transcript.
+      type: object
+      additionalProperties: false
+      required: [type, requestId, ok]
+      properties:
+        type:
+          const: meetingNotesResult
+        requestId:
+          type: string
+        ok:
+          type: boolean
+        text:
+          type: string
+        savedTo:
+          type: string
+        error:
+          type: string
+
+    CalendarEvent:
+      description: |
+        One upcoming event from the person's calendar feeds. Stays on this machine:
+        nothing about it reaches the room except, optionally, the `meeting` status.
+      type: object
+      additionalProperties: false
+      required: [id, title, start, end, allDay]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        start:
+          type: integer
+          description: ms since epoch.
+        end:
+          type: integer
+        allDay:
+          type: boolean
+        joinUrl:
+          type: string
+          description: https link to the video call (Google Meet, Teams, Zoom, Webex...), when the event has one.
+        location:
+          type: string
+
+    CalendarFeedInfo:
+      type: object
+      additionalProperties: false
+      required: [id, label, ok]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+          description: Host of the feed (calendar.google.com, outlook.office365.com...) — never the secret URL itself.
+        ok:
+          type: boolean
+        error:
+          type: string
+
+    CalendarState:
+      description: |
+        The calendar integration: configured feeds (host only), the events of the
+        next 24 hours, and whether one is in progress. Sent on webviewReady and
+        after every sync.
+      type: object
+      additionalProperties: false
+      required: [type, feeds, events, autoStatus, inMeeting]
+      properties:
+        type:
+          const: calendarState
+        feeds:
+          type: array
+          items:
+            $ref: '#/components/schemas/CalendarFeedInfo'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/CalendarEvent'
+        autoStatus:
+          type: boolean
+          description: Show "In a meeting" to the room while an event is in progress.
+        inMeeting:
+          type: boolean
+        syncedAt:
+          type: integer
+        error:
+          type: string
+          description: Why the last change was refused (a malformed address, too many calendars).
+
+    SpotifyTrack:
+      type: object
+      additionalProperties: false
+      required: [title, artist, isPlaying]
+      properties:
+        title:
+          type: string
+        artist:
+          type: string
+        album:
+          type: string
+        isPlaying:
+          type: boolean
+        trackUrl:
+          type: string
+        progressMs:
+          type: integer
+        durationMs:
+          type: integer
+
+    SpotifyStatus:
+      description: |
+        The Spotify integration. Tokens never leave the server; the webview only
+        learns whether it is connected and what is playing. `clientId` is the
+        person's own Spotify app (they register `redirectUri` in it).
+      type: object
+      additionalProperties: false
+      required: [type, clientId, redirectUri, connected, pendingAuth, nowPlaying]
+      properties:
+        type:
+          const: spotifyStatus
+        clientId:
+          type: string
+        redirectUri:
+          type: string
+        connected:
+          type: boolean
+        pendingAuth:
+          type: boolean
+        nowPlaying:
+          oneOf:
+            - $ref: '#/components/schemas/SpotifyTrack'
+            - type: 'null'
+        error:
+          type: string
+
+    OfficeInBrowser:
+      description: |
+        VS Code: whether this window's office is open in a browser page (its web
+        view). While it is, the page there is the person's: the panel publishes
+        no position and no meeting presence of its own, and says where to look.
+      type: object
+      additionalProperties: false
+      required: [type, open]
+      properties:
+        type:
+          const: officeInBrowser
+        open:
+          type: boolean
+
+    OpenExternalUrl:
+      description: |
+        Standalone only: open this https URL in a new browser tab (the Spotify
+        sign-in page). Sent to the one client that asked for it.
+      type: object
+      additionalProperties: false
+      required: [type, url]
+      properties:
+        type:
+          const: openExternalUrl
+        url:
+          type: string
 
     LayoutLoaded:
       description: |
@@ -945,6 +1735,288 @@ components:
           const: setLastSeenVersion
         version:
           type: string
+
+    SendChat:
+      description: |
+        Send a chat message to the multiplayer room. Ignored when multiplayer is
+        off or the relay is unreachable, and — standalone — from an untokened
+        connection, which must not be able to speak as this office.
+      type: object
+      additionalProperties: false
+      required: [type, text]
+      properties:
+        type:
+          const: sendChat
+        text:
+          type: string
+
+    JoinRoom:
+      description: |
+        Join the multiplayer room from the join screen. `relayUrl` (ws:// or
+        wss://) changes the relay; absent = the one in `multiplayerStatus`.
+        Name, room and a given relay are remembered for next time.
+        Privileged-only in standalone.
+      type: object
+      additionalProperties: false
+      required: [type, name, room]
+      properties:
+        type:
+          const: joinRoom
+        name:
+          type: string
+        room:
+          type: string
+        relayUrl:
+          type: string
+
+    LeaveRoom:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: leaveRoom
+
+    SaveRoomLayout:
+      description: |
+        An edit of the room's shared map, made on revision `base`. The relay
+        takes it only while `base` is still the map's revision; it lands as a
+        `roomLayout` carrying `editId`, for the whole room, or comes back as
+        `roomLayoutRejected`. Never written to this office's layout.json.
+        Privileged-only in standalone.
+      type: object
+      additionalProperties: false
+      required: [type, layout, base, editId]
+      properties:
+        type:
+          const: saveRoomLayout
+        layout:
+          type: object
+          description: Opaque OfficeLayout; the office and the relay sanitize it.
+        base:
+          type: integer
+        editId:
+          type: string
+          description: The page's id for this edit (at most 64 characters).
+
+    PresenceCharacter:
+      type: object
+      additionalProperties: false
+      required: [id, isAvatar, pose]
+      properties:
+        id:
+          type: integer
+          description: Agent id, or 0 for the person's character while no agent drives it.
+        isAvatar:
+          type: boolean
+        palette:
+          type: integer
+          description: Sprite of the person's character while no agent drives it (an agent brings its own).
+        hueShift:
+          type: integer
+        pose:
+          $ref: '#/components/schemas/RemotePose'
+
+    PresenceUpdate:
+      description: |
+        Where this office's characters are in the shared room layout, and the
+        desk it claimed. The webview runs the character simulation, so only it
+        knows positions; the server folds them into what it publishes. Sent a
+        few times a second while something moves. Privileged-only in standalone.
+      type: object
+      additionalProperties: false
+      required: [type, characters, desk]
+      properties:
+        type:
+          const: presenceUpdate
+        characters:
+          type: array
+          items:
+            $ref: '#/components/schemas/PresenceCharacter'
+        desk:
+          oneOf:
+            - type: string
+            - type: 'null'
+
+    UpdateProfile:
+      description: |
+        Change this office's profile (any subset of the fields). Saved to
+        ~/.pixel-agents/multiplayer-profile.json and published to the room.
+        `look: null` goes back to an automatic character. Privileged-only in standalone.
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: updateProfile
+        look:
+          oneOf:
+            - $ref: '#/components/schemas/AvatarLook'
+            - type: 'null'
+        status:
+          $ref: '#/components/schemas/PersonStatus'
+        statusText:
+          type: string
+        decor:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeskDecorItem'
+        shareMusic:
+          type: boolean
+        deskStyle:
+          description: A desk style id, or null for the desk as the room built it.
+          oneOf:
+            - type: string
+            - type: 'null'
+        hidden:
+          type: array
+          items:
+            type: string
+
+    ConfigureCalendar:
+      description: |
+        Calendar feeds: add a secret iCal address (Google "Secret address in iCal
+        format", Outlook "Publish calendar" ICS link; https:// or webcal://),
+        remove one by id, toggle the automatic meeting status, or sync now.
+        Privileged-only in standalone.
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: configureCalendar
+        addFeed:
+          type: string
+        removeFeed:
+          type: string
+        autoStatus:
+          type: boolean
+        refresh:
+          type: boolean
+
+    SpotifyCommand:
+      description: |
+        connect (with the person's app `clientId`) starts the sign-in; the rest
+        control playback (Spotify Premium) or refresh what is playing.
+        Privileged-only in standalone.
+      type: object
+      additionalProperties: false
+      required: [type, action]
+      properties:
+        type:
+          const: spotifyCommand
+        action:
+          $ref: '#/components/schemas/SpotifyAction'
+        clientId:
+          type: string
+
+    SpotifyAction:
+      type: string
+      enum: [connect, disconnect, play, pause, next, previous, refresh]
+
+    OpenExternal:
+      description: |
+        VS Code: open an https link (a meeting's join link, a song) in the
+        browser or the app registered for it. The standalone page opens links itself.
+      type: object
+      additionalProperties: false
+      required: [type, url]
+      properties:
+        type:
+          const: openExternal
+        url:
+          type: string
+
+    CopyWebLink:
+      description: |
+        VS Code: copy a link that opens THIS window's office in a browser, where
+        meetings can use the camera, microphone and screen. The window starts
+        its web view on first use (loopback only, its own token) and offers to
+        open the link. The standalone page is already in a browser: ignored.
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: copyWebLink
+
+    UpdateMeetingPresence:
+      description: |
+        Join, update or leave (null) a meeting. Re-sent every few seconds while
+        in one: the server drops a presence nobody refreshes, so a closed tab
+        leaves the call. Privileged-only in standalone.
+      type: object
+      additionalProperties: false
+      required: [type, meeting]
+      properties:
+        type:
+          const: updateMeetingPresence
+        meeting:
+          oneOf:
+            - $ref: '#/components/schemas/MeetingPresence'
+            - type: 'null'
+
+    SendMeetingSignal:
+      description: WebRTC signaling (or an invite) to one office in the room. Privileged-only in standalone.
+      type: object
+      additionalProperties: false
+      required: [type, to, data]
+      properties:
+        type:
+          const: sendMeetingSignal
+        to:
+          type: string
+          description: Receiver's peerId.
+        data:
+          $ref: '#/components/schemas/MeetingSignalData'
+
+    SendMeetingEvent:
+      description: Say something in the current meeting (chat, reaction, caption, notes). Privileged-only in standalone.
+      type: object
+      additionalProperties: false
+      required: [type, event]
+      properties:
+        type:
+          const: sendMeetingEvent
+        event:
+          $ref: '#/components/schemas/MeetingEventBody'
+
+    MeetingLine:
+      type: object
+      additionalProperties: false
+      required: [name, text, ts]
+      properties:
+        name:
+          type: string
+        text:
+          type: string
+        ts:
+          type: integer
+
+    GenerateMeetingNotes:
+      description: |
+        Write meeting notes from the transcript (and chat) with the person's own
+        Claude Code (`claude -p`, no tools, no saved session), and save notes +
+        transcript under ~/.pixel-agents/meetings/. Answered with
+        `meetingNotesResult`. Privileged-only in standalone.
+      type: object
+      additionalProperties: false
+      required: [type, requestId, title, transcript, chat]
+      properties:
+        type:
+          const: generateMeetingNotes
+        requestId:
+          type: string
+        title:
+          type: string
+        transcript:
+          type: array
+          items:
+            $ref: '#/components/schemas/MeetingLine'
+        chat:
+          type: array
+          items:
+            $ref: '#/components/schemas/MeetingLine'
 
     SetAlwaysShowLabels:
       type: object

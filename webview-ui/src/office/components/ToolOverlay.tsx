@@ -122,7 +122,7 @@ export function ToolOverlay({
   const el = containerRef.current;
   if (!el) return null;
   const project = overlayProjection(
-    officeState.getLayout(),
+    officeState.getView(),
     el.getBoundingClientRect(),
     zoom,
     panRef.current,
@@ -140,7 +140,8 @@ export function ToolOverlay({
     <>
       {allIds.map((id) => {
         const ch = officeState.characters.get(id);
-        if (!ch) return null;
+        // Upstairs / downstairs from the level on screen: not drawn, no label.
+        if (!ch || !officeState.isOnView(ch)) return null;
 
         const isSelected = selectedId === id;
         const isHovered = hoveredId === id;

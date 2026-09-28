@@ -16,6 +16,7 @@ import type {
   WaitSpot,
 } from '../types.js';
 import { DEFAULT_COLS, DEFAULT_ROWS, Direction, TILE_SIZE, TileType } from '../types.js';
+import { isDoorType } from './doors.js';
 import { getCatalogEntry, getOrientationInGroup } from './furnitureCatalog.js';
 import { isWalkable } from './tileMap.js';
 
@@ -118,6 +119,7 @@ export function getBlockedTiles(
   for (const item of furniture) {
     const entry = getCatalogEntry(item.type);
     if (!entry) continue;
+    if (isDoorType(item.type)) continue; // a doorway is walked through
     const bgRows = entry.backgroundTiles || 0;
     for (let dr = 0; dr < entry.footprintH; dr++) {
       if (dr < bgRows) continue; // skip background rows — characters can walk through

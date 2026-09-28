@@ -93,6 +93,10 @@ export const PAN_MARGIN_FRACTION = 0.25;
 // ── Editor ───────────────────────────────────────────────────
 export const UNDO_STACK_MAX_SIZE = 50;
 export const LAYOUT_SAVE_DEBOUNCE_MS = 500;
+/** A room-map edit the room did not take (too fast, relay reconnecting) is retried after this. */
+export const ROOM_LAYOUT_RETRY_MS = 1000;
+/** Refusals in a row before an edit is dropped and the room's map put back on screen. */
+export const ROOM_LAYOUT_MAX_RETRIES = 5;
 
 // ── Layout Import/Export (browser-native, standalone) ────────
 /** Suggested filename when exporting the office layout from the standalone browser. */
@@ -321,6 +325,196 @@ export const REMOTE_AGENT_ID_BASE = -1_000_000;
  *  reads it (anything outside the provider's readingTools animates as typing). */
 export const REMOTE_TYPING_TOOL_NAME = 'remote:typing';
 
+// ── Multiplayer room (join screen, avatar, shared map) ───────
+/** Character id of the person's own character while no Claude agent drives it.
+ *  Between the remote range (REMOTE_AGENT_ID_BASE down) and sub-agents (-1 down). */
+export const AVATAR_LOCAL_ID = -900_000;
+/** How often the webview reports its characters' poses to the server (only when changed). */
+export const PRESENCE_SEND_INTERVAL_MS = 150;
+/** A remote character further than this from where its office says it is jumps there. */
+export const REMOTE_POSE_SNAP_PX = 48;
+/** Remote characters catch up a little faster than they walk, so they never lag behind. */
+export const REMOTE_POSE_SPEED_FACTOR = 1.4;
+/** Below this distance a remote character counts as arrived. */
+export const REMOTE_POSE_EPSILON_PX = 0.5;
+/** Desk picker marker size, in CSS px, and the name tag's offset under the feet. */
+export const DESK_MARKER_SIZE_PX = 18;
+export const NAME_TAG_OFFSET_PX = 4;
+/** Above the tool overlay and chat bubbles, below modals. */
+export const DESK_PICKER_Z_INDEX = 44;
+
+// ── Emotes (dance, reactions) ────────────────────────────────
+/** One dance beat; jump hops and reaction hops are paced by it too. */
+export const EMOTE_BEAT_SEC = 0.3;
+export const EMOTE_DANCE_HOP_PX = 2;
+export const EMOTE_JUMP_HOP_PX = 6;
+export const EMOTE_JUMP_HOPS = 3;
+export const EMOTE_REACTION_HOP_PX = 2;
+/** Spin: seconds per quarter turn. */
+export const EMOTE_SPIN_STEP_SEC = 0.1;
+/** Floating emoji: how far it rises (CSS px) over its life, and its size. */
+export const EMOTE_FLOAT_RISE_PX = 28;
+export const EMOTE_EMOJI_SIZE_PX = 22;
+/** Dance notes: a new one every this many seconds. */
+export const EMOTE_NOTE_INTERVAL_SEC = 0.9;
+export const NAME_TAG_Z_INDEX = 40;
+
+// ── Multiplayer chat ─────────────────────────────────────────
+/** Chat lines the panel keeps (the server replays at most this many too). */
+export const CHAT_HISTORY_LIMIT = 100;
+/** Longest message the input accepts; the relay caps at the same length. */
+export const CHAT_MAX_LENGTH = 280;
+/** How long a speech bubble stays: a base plus reading time per character, clamped. */
+export const CHAT_BUBBLE_BASE_MS = 3000;
+export const CHAT_BUBBLE_PER_CHAR_MS = 60;
+export const CHAT_BUBBLE_MIN_MS = 4000;
+export const CHAT_BUBBLE_MAX_MS = 10_000;
+/** Typewriter reveal speed of the bubble text. */
+export const CHAT_BUBBLE_TYPE_MS_PER_CHAR = 28;
+/** Fade-out at the end of a bubble's life. */
+export const CHAT_BUBBLE_FADE_MS = 500;
+/** Bubble width cap, in CSS px. */
+export const CHAT_BUBBLE_MAX_WIDTH_PX = 220;
+/** Gap between the character's label anchor and the bubble's bottom edge, in CSS px. */
+export const CHAT_BUBBLE_RISE_PX = 40;
+/** Above the tool overlay (41/42), below the intro bubble (45). */
+export const CHAT_BUBBLE_Z_INDEX = 43;
+/** Side panel width, in CSS px. */
+export const CHAT_PANEL_WIDTH_PX = 280;
+
+// ── Avatar look (customization) ──────────────────────────────
+/** Hair colors the avatar editor offers (AvatarLook.hair indexes this; -1 = the sprite's own). */
+export const HAIR_SWATCHES: ReadonlyArray<{ label: string; color: string }> = [
+  { label: 'Black', color: '#1E1A1A' },
+  { label: 'Dark brown', color: '#4A2C1A' },
+  { label: 'Brown', color: '#7A4A2A' },
+  { label: 'Auburn', color: '#8E3B1F' },
+  { label: 'Ginger', color: '#C8642A' },
+  { label: 'Blonde', color: '#D8B25A' },
+  { label: 'Platinum', color: '#E8E0C8' },
+  { label: 'Gray', color: '#9A9A9A' },
+  { label: 'Blue', color: '#3A6FD8' },
+  { label: 'Pink', color: '#E06AA8' },
+  { label: 'Purple', color: '#7A4AD0' },
+  { label: 'Green', color: '#3AA060' },
+];
+/** Clothes colors (AvatarLook.top / .bottom index this; -1 = the sprite's own). */
+export const OUTFIT_SWATCHES: ReadonlyArray<{ label: string; color: string }> = [
+  { label: 'Red', color: '#C83A3A' },
+  { label: 'Orange', color: '#E0782A' },
+  { label: 'Yellow', color: '#E0C040' },
+  { label: 'Green', color: '#3A9A4A' },
+  { label: 'Teal', color: '#2A9A9A' },
+  { label: 'Blue', color: '#2A5AC8' },
+  { label: 'Navy', color: '#1E2A5A' },
+  { label: 'Purple', color: '#7A3AC0' },
+  { label: 'Pink', color: '#E070A8' },
+  { label: 'White', color: '#E8E8E8' },
+  { label: 'Gray', color: '#7A7A7A' },
+  { label: 'Black', color: '#262626' },
+];
+/** Recolor: the source colors of a part keep at least this lightness spread, so a
+ *  near-black hairdo recolored blonde still has its shading. */
+export const LOOK_MIN_LIGHTNESS_SPREAD = 0.12;
+/** Avatar editor preview: sprite scale and how often it turns to show another side. */
+export const LOOK_PREVIEW_SCALE = 6;
+export const LOOK_PREVIEW_TURN_MS = 1400;
+
+// ── Status, people, following ────────────────────────────────
+/** Status dot colors (name tags, people panel, status menu). */
+export const STATUS_COLORS: Record<'available' | 'busy' | 'meeting' | 'away', string> = {
+  available: '#4AC060',
+  busy: '#E04848',
+  meeting: '#B070F0',
+  away: '#E0B040',
+};
+export const STATUS_TEXT_MAX_LENGTH = 60;
+/** Status dot size on name tags, in CSS px. */
+export const STATUS_DOT_PX = 6;
+/** Following someone: how often the path is recomputed, and how close counts as "there" (tiles). */
+export const FOLLOW_REPATH_SEC = 0.5;
+export const FOLLOW_ARRIVE_TILES = 1;
+/** Side panels (people, calendar, music, decorate) width, in CSS px. */
+export const SIDE_PANEL_WIDTH_PX = 300;
+
+// ── Desk decoration ──────────────────────────────────────────
+/** How far from the desk's chair decoration may go, in tiles (the relay caps at 3). */
+export const DECOR_MAX_OFFSET = 3;
+/** Items per desk (the relay caps at 12). */
+export const DECOR_MAX_ITEMS = 12;
+/** Where a desk item saved without a pixel position stands within its tile (its base's middle). */
+export const DECOR_DEFAULT_PX = 8;
+export const DECOR_DEFAULT_PY = 12;
+/** The decorate overlay (ghost, tabletop outline): over the map, under the toolbar and panels. */
+export const DECOR_PLACER_Z_INDEX = 15;
+
+// ── Calendar ─────────────────────────────────────────────────
+/** A meeting starting within this long gets the "starting soon" toast (and the join button lights up). */
+export const MEETING_SOON_MS = 5 * 60_000;
+/** The toast offers to join until this long after the start. */
+export const MEETING_TOAST_GRACE_MS = 10 * 60_000;
+
+// ── Meetings (video calls inside the room) ───────────────────
+/** While in a meeting the page re-sends its presence this often; the server
+ *  drops a presence nobody refreshed (a closed tab) after a few misses. */
+export const MEETING_PRESENCE_HEARTBEAT_MS = 5_000;
+/** The relay caps these too (server/src/constants.ts). */
+export const MEETING_TITLE_MAX_LENGTH = 60;
+export const MEETING_CHAT_MAX_LENGTH = 500;
+export const MEETING_NOTES_MAX_LENGTH = 8_000;
+export const MEETING_CAPTION_MAX_LENGTH = 500;
+/** Screens one person may share at once. */
+export const MEETING_MAX_SCREENS = 4;
+/** Used when neither the relay nor multiplayer.json names ICE servers. */
+export const MEETING_DEFAULT_ICE_SERVERS: Array<{ urls: string[] }> = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+];
+/** getUserMedia video constraints (plain data: this file stays free of DOM types). */
+export const MEETING_CAMERA_CONSTRAINTS = {
+  width: { ideal: 640 },
+  height: { ideal: 360 },
+  frameRate: { ideal: 24, max: 30 },
+};
+/** A reaction floats over the tile (and the character) this long. */
+export const MEETING_REACTION_FLOAT_MS = 2_500;
+/** Live captions stay on the stage this long after the line was said. */
+export const MEETING_CAPTION_SHOW_MS = 8_000;
+/** Speaking detection: RMS level above this counts as talking, held this long. */
+export const MEETING_SPEAKING_THRESHOLD = 0.035;
+export const MEETING_SPEAKING_HOLD_MS = 700;
+export const MEETING_SPEAKING_POLL_MS = 120;
+/** A peer connection that stays failed this long gets an ICE restart. */
+export const MEETING_ICE_RESTART_DELAY_MS = 3_000;
+/** A connection not through this long after it was set up restarts ICE (a lost signal, stuck gathering). */
+export const MEETING_CONNECT_WATCHDOG_MS = 8_000;
+/** The polite side of a new connection waits this long for the other side's first offer before offering itself. */
+export const MEETING_POLITE_OFFER_WAIT_MS = 3_000;
+/** Minimized call: the tiles along the top of the office. */
+export const MEETING_STRIP_TILE_W = 176;
+export const MEETING_STRIP_TILE_H = 99;
+export const MEETING_STRIP_MAX_TILES = 6;
+export const MEETING_SIDEBAR_WIDTH_PX = 320;
+/** Over the office and its panels, under modals. */
+export const MEETING_STAGE_Z_INDEX = 40;
+export const MEETING_STRIP_Z_INDEX = 25;
+/** Recording: the composed video's size and frame rate. */
+export const MEETING_RECORD_WIDTH = 1280;
+export const MEETING_RECORD_HEIGHT = 720;
+export const MEETING_RECORD_FPS = 30;
+/** Recording canvas colors (the tiles as the file shows them). */
+export const MEETING_RECORD_BG = '#11111b';
+export const MEETING_RECORD_TILE_BG = '#1e1e2e';
+export const MEETING_RECORD_TILE_BORDER = '#4a4a6a';
+export const MEETING_RECORD_SPEAKING = '#746fff';
+export const MEETING_RECORD_LABEL_BG = 'rgba(10, 10, 20, 0.75)';
+export const MEETING_RECORD_TEXT = '#e8e8f0';
+export const MEETING_RECORD_AVATAR_BG = '#6030ff';
+/** Meeting music: starting volume (0-1) of the built-in soundtrack. */
+export const MEETING_MUSIC_DEFAULT_VOLUME = 0.25;
+/** How far ahead the soundtrack schedules notes, and how often it tops the queue up. */
+export const MEETING_MUSIC_LOOKAHEAD_SEC = 0.25;
+export const MEETING_MUSIC_TICK_MS = 50;
+
 // ── Game Tables (ping pong, air hockey, foosball) ─────────────
 /** Catalog groupIds of two-player game tables (assets/furniture/<id>/). Idle agents
  *  stand at the left/right ends and play; the table shows its animated on-state
@@ -374,3 +568,66 @@ export const SCOREBOARD_MIN_FONT_SIZE_PX = 10;
 export const SCOREBOARD_COLOR = '#ffffff';
 export const SCOREBOARD_SHADOW_COLOR = '#000000';
 export const SCOREBOARD_OFFSET_PX = 6;
+
+// ── Levels (floors of the building) + portals (stairs, elevators) ──
+/** How many levels a building can have. */
+export const MAX_LEVELS = 8;
+/** VOID columns kept between two levels in the layout grid (never walkable, never painted). */
+export const LEVEL_GAP_COLS = 1;
+/** Id of the level a single-level layout implicitly is. */
+export const MAIN_LEVEL_ID = 'main';
+/** Default names: the ground floor, then numbered floors up and basements down. */
+export const LEVEL_GROUND_NAME = 'Ground floor';
+export const levelDefaultName = (elevation: number): string =>
+  elevation === 0
+    ? LEVEL_GROUND_NAME
+    : elevation > 0
+      ? `Floor ${elevation}`
+      : elevation === -1
+        ? 'Basement'
+        : `Basement ${-elevation}`;
+export const LEVEL_NAME_MAX_LENGTH = 24;
+/** Floor color of a new level's tiles (warm beige, like the default office). */
+export const LEVEL_NEW_FLOOR_COLOR: ColorValue = { h: 35, s: 30, b: 15, c: 0 };
+/** Catalog groupIds of portal furniture (assets/furniture/<id>/). Stairs come in
+ *  pairs; every elevator door sharing a link is one elevator's stops. */
+export const STAIRS_GROUP_ID = 'STAIRS';
+export const ELEVATOR_GROUP_ID = 'ELEVATOR';
+/** Stairs are drawn by where their other end is: a flight going up, or a stairwell going down. */
+export const STAIRS_UP_TYPE = 'STAIRS_UP';
+export const STAIRS_DOWN_TYPE = 'STAIRS_DOWN';
+/** Elevator doors, drawn open while someone gets in or out. */
+export const ELEVATOR_CLOSED_TYPE = 'ELEVATOR_CLOSED';
+export const ELEVATOR_OPEN_TYPE = 'ELEVATOR_OPEN';
+/** Ride durations: stairs, and an elevator (base + per level travelled). */
+export const TRANSIT_STAIRS_SEC = 1.1;
+export const TRANSIT_ELEVATOR_BASE_SEC = 1.4;
+export const TRANSIT_ELEVATOR_PER_LEVEL_SEC = 0.35;
+/** Ride visuals, sprite px: how far a character climbs / sinks / steps into a door. */
+export const TRANSIT_CLIMB_PX = 12;
+export const TRANSIT_SINK_PX = 26;
+export const TRANSIT_DOOR_PX = 5;
+/** The label floating over a rider: arrow + the level it goes to. */
+export const TRANSIT_LABEL_FONT_SIZE_PX = 6;
+export const TRANSIT_LABEL_MIN_FONT_SIZE_PX = 10;
+export const TRANSIT_LABEL_OFFSET_PX = 30;
+export const TRANSIT_LABEL_UP_COLOR = '#7CFC9A';
+export const TRANSIT_LABEL_DOWN_COLOR = '#FFB86B';
+export const TRANSIT_LABEL_SHADOW_COLOR = '#000000';
+/** Longest level name shown in a rider's label. */
+export const TRANSIT_LABEL_MAX_CHARS = 14;
+/** How often the floor switcher and the elevator question re-read who is where. */
+export const LEVEL_SWITCHER_REFRESH_MS = 250;
+export const ELEVATOR_PICKER_REFRESH_MS = 150;
+
+// ── Doors ──────────────────────────────────────────────────────
+/** Catalog groupId of doors (assets/furniture/DOOR/): they sit in a wall and open by themselves. */
+export const DOOR_GROUP_ID = 'DOOR';
+/** How fast a door swings (fraction of the way per second), opening and closing. */
+export const DOOR_OPEN_SPEED = 7;
+export const DOOR_CLOSE_SPEED = 4;
+/** A door stays open this long after the last person went through. */
+export const DOOR_HOLD_SEC = 0.6;
+/** Someone this close to the doorway (px, along the way through / across it) opens the door. */
+export const DOOR_REACH_PX = 14;
+export const DOOR_REACH_ACROSS_PX = 7;

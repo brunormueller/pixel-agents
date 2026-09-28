@@ -1,0 +1,13 @@
+{
+  "id": "JUNINA_LANTERN",
+  "name": "Festa junina lantern",
+  "category": "decor",
+  "type": "asset",
+  "canPlaceOnWalls": false,
+  "canPlaceOnSurfaces": true,
+  "backgroundTiles": 0,
+  "width": 16,
+  "height": 16,
+  "footprintW": 1,
+  "footprintH": 1
+}

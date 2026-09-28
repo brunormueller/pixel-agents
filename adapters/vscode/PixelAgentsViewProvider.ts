@@ -1,3 +1,5 @@
+import * as crypto from 'crypto';
+import type { FastifyInstance } from 'fastify';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -25,17 +27,26 @@ import {
   sendPetSpritesToWebview,
   sendWallTilesToWebview,
 } from '../../server/src/assetLoader.js';
-import { loadAllCharacters, loadAllFurniture, loadAllPets } from '../../server/src/assetReload.js';
+import {
+  buildAssetCache,
+  loadAllCharacters,
+  loadAllFurniture,
+  loadAllPets,
+} from '../../server/src/assetReload.js';
 import {
   getHooksConsent,
   getHooksEnabled,
   getMultiplayerSettings,
   grantHooksConsent,
   readConfig,
+  readMultiplayerProfile,
   setHooksEnabled as persistHooksEnabled,
   writeConfig,
+  writeMultiplayerProfile,
 } from '../../server/src/configPersistence.js';
 import { setFolderNameResolver, setTerminalAdapter } from '../../server/src/fileWatcher.js';
+import { createHttpServer } from '../../server/src/httpServer.js';
+import { Integrations, isOpenableUrl } from '../../server/src/integrations/index.js';
 import type { LayoutWatcher } from '../../server/src/layoutPersistence.js';
 import {
   readLayoutFromFile,
@@ -111,8 +122,16 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
   // Pixel Agents Server (hook event reception)
   private pixelAgentsServer: PixelAgentsServer | null = null;
 
-  // Multiplayer relay client (only when config.json has a valid `multiplayer` block)
+  // Multiplayer relay client: every window can join a room (the join screen asks for the relay if none is known)
   private multiplayer: MultiplayerClient | null = null;
+  // The person's calendar and Spotify (always on; idle until configured)
+  private integrations: Integrations;
+  // This window's office opened in a browser ("Web" button): a loopback server
+  // of its own (own token, not in the discovery registry, no hooks), started on
+  // first use. While a page is open there, it is the person's page.
+  private webView: { app: FastifyInstance; url: string } | null = null;
+  private webViewStarting: Promise<string | null> | null = null;
+  private webPages = 0;
   private adapter: StateAdapter;
 
   // Auto-spawn guard: ensures the startup spawn fires at most once per VS Code
@@ -186,16 +205,30 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     // Create shared runtime (owns timer Maps, scanners, hook handler, dismissal tracker)
     this.runtime = new AgentRuntime(this.store, claudeProvider);
 
+    // Multiplayer: every window can join a room. The webview's join screen asks
+    // for name, room and — when none is known yet — the relay (prefilled with the
+    // last answer, multiplayer.json or the build's default). Nothing connects
+    // until it's answered.
     const multiplayerSettings = getMultiplayerSettings();
-    if (multiplayerSettings) {
-      console.log(`[Pixel Agents] Multiplayer: joining ${multiplayerSettings.relayUrl}`);
-      this.multiplayer = new MultiplayerClient(
-        this.store,
-        multiplayerSettings,
-        claudeProvider.readingTools,
-      );
-      this.multiplayer.start();
+    if (multiplayerSettings.relayUrl) {
+      console.log(`[Pixel Agents] Multiplayer: relay ${multiplayerSettings.relayUrl} available`);
     }
+    this.multiplayer = new MultiplayerClient(
+      this.store,
+      multiplayerSettings,
+      claudeProvider.readingTools,
+      {
+        getLocalLayout: () => readLayoutFromFile(),
+        rememberProfile: writeMultiplayerProfile,
+        initialProfile: readMultiplayerProfile(),
+      },
+    );
+
+    this.integrations = new Integrations(this.store, {
+      multiplayer: this.multiplayer ?? undefined,
+      openUrl: openExternalLink,
+    });
+    this.integrations.start();
 
     this.initServer();
   }
@@ -487,8 +520,11 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         console.log(`[Pixel Agents] State: saveAgentSeats:`, JSON.stringify(message.seats));
         this.adapter.saveSeats(message.seats);
       } else if (message.type === 'saveLayout') {
+        // The map on screen is the room's (its edits go out as saveRoomLayout).
+        if (this.multiplayer?.showsRoomLayout()) return;
         this.layoutWatcher?.markOwnWrite();
         writeLayoutToFile(message.layout as Record<string, unknown>);
+        this.multiplayer?.onLocalLayoutSaved(message.layout as Record<string, unknown>);
       } else if (message.type === 'setSoundEnabled') {
         this.adapter.setSetting(GLOBAL_KEY_SOUND_ENABLED, message.enabled);
       } else if (message.type === 'setLastSeenVersion') {
@@ -510,6 +546,46 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         }
       } else if (message.type === 'setHooksInfoShown') {
         this.adapter.setSetting(GLOBAL_KEY_HOOKS_INFO_SHOWN, true);
+      } else if (message.type === 'sendChat') {
+        this.multiplayer?.sendChat(message.text);
+      } else if (message.type === 'joinRoom') {
+        this.multiplayer?.join(message.room, message.name, message.relayUrl);
+      } else if (message.type === 'leaveRoom') {
+        this.multiplayer?.leave();
+      } else if (message.type === 'copyWebLink') {
+        void this.copyWebLink();
+      } else if (
+        this.webPages > 0 &&
+        (message.type === 'presenceUpdate' ||
+          message.type === 'updateMeetingPresence' ||
+          message.type === 'sendMeetingSignal' ||
+          message.type === 'sendMeetingEvent')
+      ) {
+        // The office is open in a browser page: that page places the person's
+        // character and holds their meeting. Two pages would contradict each other.
+        return;
+      } else if (message.type === 'presenceUpdate') {
+        this.multiplayer?.setPresence(message.characters, message.desk);
+      } else if (message.type === 'saveRoomLayout') {
+        this.multiplayer?.editRoomLayout(message.layout, message.base, message.editId);
+      } else if (message.type === 'updateProfile') {
+        this.multiplayer?.updateProfile(message as Record<string, unknown>);
+      } else if (message.type === 'updateMeetingPresence') {
+        this.multiplayer?.setMeeting(message.meeting);
+      } else if (message.type === 'sendMeetingSignal') {
+        this.multiplayer?.sendMeetingSignal(message.to, message.data);
+      } else if (message.type === 'sendMeetingEvent') {
+        this.multiplayer?.sendMeetingEvent(message.event);
+      } else if (
+        message.type === 'configureCalendar' ||
+        message.type === 'spotifyCommand' ||
+        message.type === 'generateMeetingNotes'
+      ) {
+        this.integrations.handle(message as Record<string, unknown>, (m) => {
+          void this.webview?.postMessage(m);
+        });
+      } else if (message.type === 'openExternal') {
+        if (isOpenableUrl(message.url)) openExternalLink(message.url);
       } else if (message.type === 'setShowAreas') {
         const enabled = message.enabled as boolean;
         this.adapter.setSetting(GLOBAL_KEY_SHOW_AREAS, enabled);
@@ -779,6 +855,8 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
                 // Send agent statuses AFTER layoutLoaded so characters exist when messages arrive
                 sendCurrentAgentStatuses(this.store, this.webview);
                 this.multiplayer?.resend((m) => void this.webview?.postMessage(m));
+                this.integrations.resend((m) => void this.webview?.postMessage(m));
+                this.sendOfficeInBrowser();
                 this.startLayoutWatcher();
               }
               return;
@@ -845,6 +923,8 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
             sendCurrentAgentStatuses(this.store, this.webview);
             // Other people's agents (multiplayer), once their seats exist.
             this.multiplayer?.resend((m) => void this.webview?.postMessage(m));
+            this.integrations.resend((m) => void this.webview?.postMessage(m));
+            this.sendOfficeInBrowser();
             this.startLayoutWatcher();
           }
         })();
@@ -924,6 +1004,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
           this.layoutWatcher?.markOwnWrite();
           writeLayoutToFile(imported);
           this.webview?.postMessage({ type: 'layoutLoaded', layout: imported });
+          this.multiplayer?.onLocalLayoutSaved(imported);
           vscode.window.showInformationMessage('Pixel Agents: Layout imported successfully.');
         } catch {
           vscode.window.showErrorMessage('Pixel Agents: Failed to read or parse layout file.');
@@ -1056,9 +1137,75 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  /** Copy the link that opens this window's office in a browser, and offer to open it. */
+  private async copyWebLink(): Promise<void> {
+    const url = await this.startWebView();
+    if (!url) return;
+    await vscode.env.clipboard.writeText(url);
+    const open = 'Open in browser';
+    const choice = await vscode.window.showInformationMessage(
+      'Pixel Agents: link copied. Open it in Chrome or Edge to use your camera, microphone and screen in meetings. Keep it to yourself: it controls this office.',
+      open,
+    );
+    if (choice === open) void vscode.env.openExternal(vscode.Uri.parse(url));
+  }
+
+  /** This window's web view, started on first use. Null when it cannot start (assets not loaded yet). */
+  private startWebView(): Promise<string | null> {
+    if (this.webView) return Promise.resolve(this.webView.url);
+    if (this.webViewStarting) return this.webViewStarting;
+    const assetsRoot = this.assetsRoot;
+    if (!assetsRoot) {
+      void vscode.window.showWarningMessage(
+        'Pixel Agents: the office is still loading. Try the Web button again in a moment.',
+      );
+      return Promise.resolve(null);
+    }
+    this.webViewStarting = (async () => {
+      try {
+        const token = crypto.randomUUID();
+        const { app, port } = await createHttpServer({
+          embedded: false,
+          quiet: true,
+          hostOwned: true,
+          configNamespace: 'vscode',
+          token,
+          store: this.store,
+          runtime: this.runtime,
+          staticDir: path.join(this.context.extensionPath, 'dist', 'webview'),
+          assetCache: await buildAssetCache(assetsRoot, readConfig().externalAssetDirectories),
+          multiplayer: this.multiplayer ?? undefined,
+          integrations: this.integrations,
+          onPagesChanged: (count) => {
+            this.webPages = count;
+            this.sendOfficeInBrowser();
+          },
+        });
+        const url = `http://127.0.0.1:${port}/?token=${token}`;
+        this.webView = { app, url };
+        console.log(`[Pixel Agents] Web view: listening on 127.0.0.1:${port}`);
+        return url;
+      } catch (err) {
+        console.error(`[Pixel Agents] Web view failed to start: ${err}`);
+        void vscode.window.showErrorMessage(`Pixel Agents: could not open the web view (${err}).`);
+        return null;
+      } finally {
+        this.webViewStarting = null;
+      }
+    })();
+    return this.webViewStarting;
+  }
+
+  private sendOfficeInBrowser(): void {
+    void this.webview?.postMessage({ type: 'officeInBrowser', open: this.webPages > 0 });
+  }
+
   dispose() {
+    void this.webView?.app.close();
+    this.webView = null;
     this.multiplayer?.dispose();
     this.multiplayer = null;
+    this.integrations.dispose();
     this.pixelAgentsServer?.stop();
     this.pixelAgentsServer = null;
     this.runtime.dispose();
@@ -1066,6 +1213,16 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     this.layoutWatcher = null;
     this.store.dispose();
   }
+}
+
+/**
+ * Open an https link (meeting join link, Spotify sign-in) in the browser or the
+ * app registered for it. Passed as the string itself: openExternal accepts it,
+ * and a round trip through vscode.Uri re-encodes query strings (Teams join
+ * links are full of %-escapes) into a link that no longer works.
+ */
+function openExternalLink(url: string): void {
+  void vscode.env.openExternal(url as unknown as vscode.Uri);
 }
 
 function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri): string {

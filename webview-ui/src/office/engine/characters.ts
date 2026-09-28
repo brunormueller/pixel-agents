@@ -24,6 +24,8 @@ import type {
   WaitSpot,
 } from '../types.js';
 import { CharacterState, Direction, TILE_SIZE } from '../types.js';
+import { emoteLook } from './emotes.js';
+import { advanceTransit, startTransit } from './transit.js';
 
 /** Whether a tool should show the reading animation (vs typing). Taxonomy comes
  *  from the active HookProvider via the `providerCapabilities` message. */
@@ -131,6 +133,11 @@ export function updateCharacter(
   /** Spectator spots nobody has claimed yet */
   freeWaits: WaitSpot[] = [],
 ): void {
+  // Riding stairs or an elevator: nothing else happens until it comes out.
+  if (ch.transit) {
+    advanceTransit(ch, dt);
+    return;
+  }
   ch.frameTimer += dt;
   if (ch.celebrateTimer > 0) ch.celebrateTimer = Math.max(0, ch.celebrateTimer - dt);
   if (ch.swingTimer > 0) ch.swingTimer = Math.max(0, ch.swingTimer - dt);
@@ -183,6 +190,9 @@ export function updateCharacter(
         ch.frameTimer -= TYPE_FRAME_DURATION_SEC;
         ch.frame = (ch.frame + 1) % 2;
       }
+      // The person's own character, with Claude idle: it stays put until the
+      // keyboard moves it (officeState steps it), never wanders off by itself.
+      if (!ch.isActive && ch.isAvatar) break;
       // If no longer active, stand up and start wandering (after seatTimer expires)
       if (!ch.isActive) {
         // Resting, but a table end is free → get up and play
@@ -254,6 +264,8 @@ export function updateCharacter(
         }
         break;
       }
+      // Keyboard-driven while Claude is idle: no wandering, no games
+      if (ch.isAvatar) break;
       // Countdown wander timer
       ch.wanderTimer -= dt;
       if (ch.wanderTimer <= 0) {
@@ -415,8 +427,13 @@ export function updateCharacter(
         break;
       }
 
-      // Move toward next tile in path
+      // Move toward next tile in path — or, when it is through stairs or an
+      // elevator, ride there (another level: not a walk).
       const nextTile = ch.path[0];
+      if (nextTile.portal) {
+        startTransit(ch, nextTile);
+        break;
+      }
       ch.dir = directionBetween(ch.tileCol, ch.tileRow, nextTile.col, nextTile.row);
 
       ch.moveProgress += (WALK_SPEED_PX_PER_SEC / TILE_SIZE) * dt;
@@ -467,6 +484,9 @@ export function updateCharacter(
 
 /** Get the correct sprite frame for a character's current state and direction */
 export function getCharacterSprite(ch: Character, sprites: CharacterSprites): SpriteData {
+  // A motion emote (dance, jump, spin) draws its own facing and stride.
+  const look = emoteLook(ch.emote);
+  if (look.walkFrame !== null) return sprites.walk[look.dir ?? ch.dir][look.walkFrame];
   switch (ch.state) {
     case CharacterState.TYPE:
       if (isReadingTool(ch.currentTool)) {

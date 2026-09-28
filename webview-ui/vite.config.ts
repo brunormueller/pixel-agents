@@ -121,6 +121,9 @@ function browserMockAssetsPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [tailwindcss(), react(), browserMockAssetsPlugin()],
+  // Tailwind runs as a Vite plugin; an inline (empty) PostCSS config stops Vite
+  // from picking up a postcss.config.* in some parent folder of the checkout.
+  css: { postcss: {} },
   build: {
     outDir: '../dist/webview',
     emptyOutDir: true,

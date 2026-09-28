@@ -103,7 +103,7 @@ function appendAlpha(hex: string, alpha: number): string {
 }
 
 /** Convert HSL (h: 0-360, s: 0-1, l: 0-1) to #RRGGBB hex string */
-function hslToHex(h: number, s: number, l: number): string {
+export function hslToHex(h: number, s: number, l: number): string {
   const c = (1 - Math.abs(2 * l - 1)) * s;
   const hp = h / 60;
   const x = c * (1 - Math.abs((hp % 2) - 1));
@@ -150,7 +150,7 @@ function clamp255(v: number): number {
 }
 
 /** Convert RGB (0-255 each) to HSL (h: 0-360, s: 0-1, l: 0-1) */
-function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+export function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   const rf = r / 255,
     gf = g / 255,
     bf = b / 255;

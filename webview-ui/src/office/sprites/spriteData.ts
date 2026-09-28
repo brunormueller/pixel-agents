@@ -3,6 +3,8 @@ import { PALETTE_COUNT } from '../../constants.js';
 import { adjustSprite } from '../colorize.js';
 import type { Direction, SpriteData } from '../types.js';
 import { Direction as Dir } from '../types.js';
+import type { AvatarLook } from './avatarLook.js';
+import { applyLook, lookKey } from './avatarLook.js';
 import bubblePermissionData from './bubble-permission.json';
 import bubblePetData from './bubble-pet.json';
 import bubbleWaitingData from './bubble-waiting.json';
@@ -184,8 +186,14 @@ function emptySprite(w: number, h: number): SpriteData {
   return rows;
 }
 
-export function getCharacterSprites(paletteIndex: number, hueShift = 0): CharacterSprites {
-  const cacheKey = `${paletteIndex}:${hueShift}`;
+/** Sprites of a character: a palette (+ hue shift), or — for a person who
+ *  customized theirs — a look, which replaces both. */
+export function getCharacterSprites(
+  paletteIndex: number,
+  hueShift = 0,
+  look?: AvatarLook | null,
+): CharacterSprites {
+  const cacheKey = look ? `look:${lookKey(look)}` : `${paletteIndex}:${hueShift}`;
   const cached = spriteCache.get(cacheKey);
   if (cached) return cached;
 
@@ -193,7 +201,10 @@ export function getCharacterSprites(paletteIndex: number, hueShift = 0): Charact
 
   if (loadedCharacters) {
     // Use pre-colored character sprites directly (no palette swapping)
-    const char = loadedCharacters[paletteIndex % loadedCharacters.length];
+    const count = loadedCharacters.length;
+    const char = look
+      ? applyLook(loadedCharacters[Math.abs(look.body) % count], look)
+      : loadedCharacters[paletteIndex % count];
     const d = char.down;
     const u = char.up;
     const rt = char.right;
@@ -246,8 +257,8 @@ export function getCharacterSprites(paletteIndex: number, hueShift = 0): Charact
     };
   }
 
-  // Apply hue shift if non-zero
-  if (hueShift !== 0) {
+  // Apply hue shift if non-zero (a look brings its own colors)
+  if (hueShift !== 0 && !look) {
     sprites = hueShiftSprites(sprites, hueShift);
   }
 

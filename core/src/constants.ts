@@ -25,3 +25,8 @@ export const TRANSPORT_STATE_CONNECTING = 'connecting';
 export const TRANSPORT_STATE_CONNECTED = 'connected';
 export const TRANSPORT_STATE_RECONNECTING = 'reconnecting';
 export const TRANSPORT_STATE_DISCONNECTED = 'disconnected';
+
+// ── Meetings ─────────────────────────────────────────────────
+/** The reactions a meeting accepts (the relay drops anything else). The webview
+ *  maps some onto character emotes, so the person's avatar reacts too. */
+export const MEETING_REACTIONS = ['👍', '❤️', '😂', '😮', '👏', '🎉', '🙌', '👋'] as const;

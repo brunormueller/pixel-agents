@@ -1,0 +1,44 @@
+{
+  "id": "OFFICE_CHAIR_SMALL",
+  "name": "Office chair (1 tile)",
+  "category": "chairs",
+  "canPlaceOnWalls": false,
+  "canPlaceOnSurfaces": false,
+  "type": "group",
+  "groupType": "rotation",
+  "rotationScheme": "3-way-mirror",
+  "backgroundTiles": 0,
+  "members": [
+    {
+      "type": "asset",
+      "id": "OFFICE_CHAIR_SMALL_FRONT",
+      "file": "OFFICE_CHAIR_SMALL_FRONT.png",
+      "width": 16,
+      "height": 16,
+      "footprintW": 1,
+      "footprintH": 1,
+      "orientation": "front"
+    },
+    {
+      "type": "asset",
+      "id": "OFFICE_CHAIR_SMALL_BACK",
+      "file": "OFFICE_CHAIR_SMALL_BACK.png",
+      "width": 16,
+      "height": 16,
+      "footprintW": 1,
+      "footprintH": 1,
+      "orientation": "back"
+    },
+    {
+      "type": "asset",
+      "id": "OFFICE_CHAIR_SMALL_SIDE",
+      "file": "OFFICE_CHAIR_SMALL_SIDE.png",
+      "width": 16,
+      "height": 16,
+      "footprintW": 1,
+      "footprintH": 1,
+      "orientation": "side",
+      "mirrorSide": true
+    }
+  ]
+}

@@ -1,4 +1,28 @@
+import type { PathStep, PortalHop } from '../types.js';
 import { TileType } from '../types.js';
+
+/** A way through a portal from a tile: where it comes out, and the ride (see portals.ts). */
+export interface PortalEdge {
+  col: number;
+  row: number;
+  hop: PortalHop;
+}
+
+/**
+ * Portal edges travel WITH the tile map they belong to: every caller already
+ * passes OfficeState's tileMap to findPath, so attaching the stairs/elevator
+ * graph to that array (instead of a new parameter on every call site) makes
+ * every path — to a seat, a game, a person being followed — use them.
+ */
+const portalEdges = new WeakMap<TileType[][], Map<string, PortalEdge[]>>();
+
+export function setPortalEdges(tileMap: TileType[][], edges: Map<string, PortalEdge[]>): void {
+  portalEdges.set(tileMap, edges);
+}
+
+export function getPortalEdges(tileMap: TileType[][]): Map<string, PortalEdge[]> | undefined {
+  return portalEdges.get(tileMap);
+}
 
 /** Check if a tile is walkable (floor, carpet, or doorway, and not blocked by furniture) */
 export function isWalkable(
@@ -34,7 +58,9 @@ export function getWalkableTiles(
   return tiles;
 }
 
-/** BFS pathfinding on 4-connected grid (no diagonals). Returns path excluding start, including end. */
+/** BFS pathfinding on 4-connected grid (no diagonals), plus the stairs and
+ *  elevators attached to the tile map (a step reached through one carries
+ *  `portal`). Returns path excluding start, including end. */
 export function findPath(
   startCol: number,
   startRow: number,
@@ -42,7 +68,9 @@ export function findPath(
   endRow: number,
   tileMap: TileType[][],
   blockedTiles: Set<string>,
-): Array<{ col: number; row: number }> {
+  /** False keeps the path on the start's level (pets never take the stairs). */
+  usePortals = true,
+): PathStep[] {
   if (startCol === endCol && startRow === endRow) return [];
 
   const key = (c: number, r: number) => `${c},${r}`;
@@ -57,10 +85,13 @@ export function findPath(
     return [];
   }
 
+  const edges = usePortals ? portalEdges.get(tileMap) : undefined;
   const visited = new Set<string>();
   visited.add(startKey);
 
   const parent = new Map<string, string>();
+  /** Tiles reached by riding a portal, and the ride. */
+  const rides = new Map<string, PortalHop>();
   const queue: Array<{ col: number; row: number }> = [{ col: startCol, row: startRow }];
 
   const dirs = [
@@ -70,17 +101,19 @@ export function findPath(
     { dc: 1, dr: 0 }, // right
   ];
 
-  while (queue.length > 0) {
-    const curr = queue.shift()!;
+  let head = 0;
+  while (head < queue.length) {
+    const curr = queue[head++];
     const currKey = key(curr.col, curr.row);
 
     if (currKey === endKey) {
       // Reconstruct path
-      const path: Array<{ col: number; row: number }> = [];
+      const path: PathStep[] = [];
       let k = endKey;
       while (k !== startKey) {
         const [c, r] = k.split(',').map(Number);
-        path.unshift({ col: c, row: r });
+        const hop = rides.get(k);
+        path.unshift(hop ? { col: c, row: r, portal: hop } : { col: c, row: r });
         k = parent.get(k)!;
       }
       return path;
@@ -97,6 +130,18 @@ export function findPath(
       visited.add(nk);
       parent.set(nk, currKey);
       queue.push({ col: nc, row: nr });
+    }
+
+    const through = edges?.get(currKey);
+    if (!through) continue;
+    for (const e of through) {
+      const nk = key(e.col, e.row);
+      if (visited.has(nk)) continue;
+      if (!isWalkable(e.col, e.row, tileMap, blockedTiles)) continue;
+      visited.add(nk);
+      parent.set(nk, currKey);
+      rides.set(nk, e.hop);
+      queue.push({ col: e.col, row: e.row });
     }
   }
 

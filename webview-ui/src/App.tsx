@@ -1,30 +1,63 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import type {
+  AvatarLook,
+  CalendarEvent,
+  DeskDecorItem,
+  PersonStatus,
+} from '../../core/src/messages.js';
 import { toMajorMinor } from './changelogData.js';
+import { AvatarEditor } from './components/AvatarEditor.js';
+import type { SidePanelId } from './components/BottomToolbar.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
+import { CalendarPanel } from './components/CalendarPanel.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
+import { ChatPanel } from './components/ChatPanel.js';
 import { ConnectionIndicator } from './components/ConnectionIndicator.js';
 import { DebugView } from './components/DebugView.js';
+import { DecorPanel } from './components/DecorPanel.js';
 import { EditActionBar } from './components/EditActionBar.js';
+import { ElevatorPicker } from './components/ElevatorPicker.js';
 import { IntroBubble } from './components/IntroBubble.js';
+import { JoinScreen } from './components/JoinScreen.js';
+import { LevelSwitcher } from './components/LevelSwitcher.js';
+import { MeetingInviteToast } from './components/meeting/MeetingInviteToast.js';
+import { MeetingsPanel } from './components/meeting/MeetingsPanel.js';
+import { MeetingView } from './components/meeting/MeetingView.js';
+import { MeetingToast } from './components/MeetingToast.js';
 import { MigrationNotice } from './components/MigrationNotice.js';
+import { MusicPanel } from './components/MusicPanel.js';
+import { PeoplePanel } from './components/PeoplePanel.js';
+import { PortalPanel } from './components/PortalPanel.js';
 import { SettingsModal } from './components/SettingsModal.js';
 import { Tooltip } from './components/Tooltip.js';
 import { Modal } from './components/ui/Modal.js';
 import { VersionIndicator } from './components/VersionIndicator.js';
 import { ZoomControls } from './components/ZoomControls.js';
+import { DECOR_MAX_ITEMS } from './constants.js';
+import { useAvatarKeyboard } from './hooks/useAvatarKeyboard.js';
 import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
 import { useExtensionMessages } from './hooks/useExtensionMessages.js';
 import { useIntroTour } from './hooks/useIntroTour.js';
+import { useMeeting } from './meeting/useMeeting.js';
+import { ChatBubbles } from './office/components/ChatBubbles.js';
+import { DecorPlacer } from './office/components/DecorPlacer.js';
+import { DeskPicker } from './office/components/DeskPicker.js';
+import { EmoteOverlay } from './office/components/EmoteOverlay.js';
+import { NameTags } from './office/components/NameTags.js';
 import { OfficeCanvas } from './office/components/OfficeCanvas.js';
 import { ToolOverlay } from './office/components/ToolOverlay.js';
 import { EditorState } from './office/editor/editorState.js';
 import { EditorToolbar } from './office/editor/EditorToolbar.js';
+import type { DeskPreset } from './office/engine/decorCatalog.js';
 import { OfficeState } from './office/engine/officeState.js';
 import { exportLayoutToFile } from './office/layout/exportLayout.js';
-import { isRotatable } from './office/layout/furnitureCatalog.js';
+import { getRotatedType, isRotatable } from './office/layout/furnitureCatalog.js';
 import { migrateLayoutColors } from './office/layout/layoutSerializer.js';
+import { portalInfo } from './office/layout/portals.js';
+import { RoomLayoutSync } from './office/layout/roomLayoutSync.js';
+import { DEFAULT_LOOK } from './office/sprites/avatarLook.js';
 import { getPetCount } from './office/sprites/petSpriteData.js';
 import { EditTool, type OfficeLayout } from './office/types.js';
 import { isBrowserRuntime, isE2E } from './runtime.js';
@@ -34,6 +67,8 @@ import { transport } from './transport/index.js';
 // Game state lives outside React — updated imperatively by message handlers
 const officeStateRef = { current: null as OfficeState | null };
 const editorState = new EditorState();
+// A multiplayer room's map, which everyone in the room edits.
+const roomLayoutSync = new RoomLayoutSync();
 
 // Test-only observability hooks (message/sound logs, addAgent wrapper, selectAgent).
 // Installed only under the e2e harness so they never patch prototypes or grow
@@ -45,6 +80,19 @@ function getOfficeState(): OfficeState {
     officeStateRef.current = new OfficeState();
   }
   return officeStateRef.current;
+}
+
+/** The person's desk decoration as the office has it — current the moment it changes,
+ *  where the profile only catches up once the server echoes it. */
+function liveDecor(): DeskDecorItem[] {
+  return getOfficeState().getLocalDecor();
+}
+
+/** Open an https link (a meeting, a song): the standalone page opens a tab, VS Code asks the extension. */
+function openUrl(url: string): void {
+  if (!url.startsWith('https://')) return;
+  if (isBrowserRuntime) window.open(url, '_blank', 'noopener,noreferrer');
+  else transport.send({ type: 'openExternal', url });
 }
 
 function App() {
@@ -59,7 +107,23 @@ function App() {
     }
   }, []);
 
-  const editor = useEditorActions(getOfficeState, editorState);
+  const editor = useEditorActions(getOfficeState, editorState, roomLayoutSync);
+
+  // Declared before useExtensionMessages: the host is in place before any room map arrives.
+  const { showRoomLayout } = editor;
+  useEffect(() => {
+    roomLayoutSync.setHost({
+      send: (layout, base, editId) =>
+        transport.send({
+          type: 'saveRoomLayout',
+          layout: layout as unknown as Record<string, unknown>,
+          base,
+          editId,
+        }),
+      show: showRoomLayout,
+    });
+    return () => roomLayoutSync.setHost(null);
+  }, [showRoomLayout]);
 
   const isEditDirty = useCallback(
     () => editor.isEditMode && editor.isDirty,
@@ -74,6 +138,14 @@ function App() {
     subagentTools,
     subagentCharacters,
     remoteCharacters,
+    chatEnabled,
+    chatMessages,
+    chatBubbles,
+    multiplayer,
+    layoutEditable,
+    officeInBrowser,
+    deskLostTo,
+    clearDeskLost,
     layoutReady,
     layoutWasReset,
     loadedAssets,
@@ -97,7 +169,10 @@ function App() {
     setAreaMappings,
     showAreas,
     setShowAreas,
-  } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty);
+    profile,
+    calendar,
+    spotify,
+  } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty, roomLayoutSync);
 
   // Show migration notice once layout reset is detected
   const [migrationNoticeDismissed, setMigrationNoticeDismissed] = useState(false);
@@ -105,6 +180,23 @@ function App() {
 
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  // One panel docked on the right at a time: chat, people, calendar, music, decorate.
+  const [sidePanel, setSidePanel] = useState<SidePanelId | null>(null);
+  const isChatOpen = sidePanel === 'chat';
+  const toggleSidePanel = useCallback(
+    (panel: SidePanelId) => setSidePanel((open) => (open === panel ? null : panel)),
+    [],
+  );
+  // Other offices' lines newer than this are unread. Starts at mount, so a
+  // replayed history doesn't greet a reload with a badge.
+  const [chatSeenTs, setChatSeenTs] = useState(() => Date.now());
+  const latestChatTs = chatMessages.length > 0 ? chatMessages[chatMessages.length - 1].ts : 0;
+  useEffect(() => {
+    if (isChatOpen && latestChatTs > chatSeenTs) setChatSeenTs(latestChatTs);
+  }, [isChatOpen, latestChatTs, chatSeenTs]);
+  const chatUnread = isChatOpen
+    ? 0
+    : chatMessages.filter((m) => !m.self && m.ts > chatSeenTs).length;
   const [isHooksInfoOpen, setIsHooksInfoOpen] = useState(false);
   const [hooksTooltipDismissed, setHooksTooltipDismissed] = useState(false);
   const [isDebugMode, setIsDebugMode] = useState(false);
@@ -229,6 +321,264 @@ function App() {
     editor.handleToggleEditMode,
   );
 
+  // ── Multiplayer room: join screen, desk, keyboard ─────────────
+  const joined = multiplayer?.joined === true;
+  const [joinDismissed, setJoinDismissed] = useState(false);
+  // The join screen greets the person only when the office knows a relay;
+  // without one it waits for "Join room" (which asks for the relay too).
+  const joinGreetCheckedRef = useRef(false);
+  useEffect(() => {
+    if (!multiplayer || joinGreetCheckedRef.current) return;
+    joinGreetCheckedRef.current = true;
+    if (multiplayer.relayUrl === '') setJoinDismissed(true);
+  }, [multiplayer]);
+  const [isDeskPicking, setIsDeskPicking] = useState(false);
+  // After joining, ask for a desk once the character exists (and has none).
+  const [deskPromptPending, setDeskPromptPending] = useState(false);
+  const [avatarBusyHint, setAvatarBusyHint] = useState(false);
+  const [isAvatarEditorOpen, setIsAvatarEditorOpen] = useState(false);
+  // ── Meetings (calls inside the room) ──────────────────────────
+  const meeting = useMeeting(getOfficeState, multiplayer?.name ?? '');
+  const [meetingStageOpen, setMeetingStageOpen] = useState(false);
+  const inCall = meeting.current !== null;
+  /** Who is in a call, per character: 'self' or the office's peerId. */
+  const meetingBadges = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const mt of meeting.meetings) {
+      for (const p of mt.participants) {
+        const extra = `${p.presence.hand ? '✋' : ''}${p.presence.screens.length > 0 ? '🖥' : ''}`;
+        out[p.self ? 'self' : p.peerId] = `${extra}📞`;
+      }
+    }
+    return out;
+  }, [meeting.meetings]);
+  /** People in the room who are not in our call (the Invite list). */
+  const currentMeeting = meeting.current;
+  const invitable = useMemo(() => {
+    const inIt = new Set(currentMeeting?.participants.map((p) => p.peerId) ?? []);
+    const byPeer = new Map<string, string>();
+    for (const c of remoteCharacters) {
+      if (!inIt.has(c.peerId) && !byPeer.has(c.peerId)) byPeer.set(c.peerId, c.peerName);
+    }
+    return [...byPeer].map(([peerId, name]) => ({ peerId, name }));
+  }, [remoteCharacters, currentMeeting]);
+  // Back in a room: sit at the desk remembered for it (once per join), when it is still free.
+  const deskRestoredRef = useRef(false);
+  const rememberedDesk = profile?.desk ?? null;
+  useEffect(() => {
+    if (!joined) {
+      deskRestoredRef.current = false;
+      return;
+    }
+    if (deskRestoredRef.current || !layoutReady || !rememberedDesk) return;
+    const os = getOfficeState();
+    if (os.avatarId === null) return;
+    deskRestoredRef.current = true;
+    if (os.getDesk() === null && os.isDeskAvailable(rememberedDesk)) os.setDesk(rememberedDesk);
+  }, [joined, layoutReady, rememberedDesk]);
+  useEffect(() => {
+    if (!deskPromptPending || !joined || !layoutReady) return;
+    setDeskPromptPending(false);
+    const os = getOfficeState();
+    if (os.getDesk() !== null) return;
+    if (rememberedDesk && os.isDeskAvailable(rememberedDesk)) os.setDesk(rememberedDesk);
+    else setIsDeskPicking(true);
+  }, [deskPromptPending, joined, layoutReady, rememberedDesk]);
+  useEffect(() => {
+    if (deskLostTo) setIsDeskPicking(true);
+  }, [deskLostTo]);
+  useEffect(() => {
+    if (!joined) setIsDeskPicking(false);
+  }, [joined]);
+  useEffect(() => {
+    if (!avatarBusyHint) return;
+    const t = setTimeout(() => setAvatarBusyHint(false), 2500);
+    return () => clearTimeout(t);
+  }, [avatarBusyHint]);
+  // The room's layout arrived while editing: its owner is someone else now.
+  useEffect(() => {
+    if (!layoutEditable && editor.isEditMode) editor.handleToggleEditMode();
+  }, [layoutEditable, editor]);
+  // The editor edits chairs where the room built them, not where turned desks put them.
+  useEffect(() => {
+    getOfficeState().setTurnsPaused(editor.isEditMode);
+  }, [editor.isEditMode]);
+  // VS Code, office open in a browser page: that page is the person's. This
+  // panel leaves its call (the call belongs where the camera works) and stops
+  // walking the character (its position would contradict the page's).
+  const leaveMeeting = meeting.leave;
+  useEffect(() => {
+    if (officeInBrowser && inCall) leaveMeeting();
+  }, [officeInBrowser, inCall, leaveMeeting]);
+  useAvatarKeyboard(
+    getOfficeState,
+    joined &&
+      !officeInBrowser &&
+      !editor.isEditMode &&
+      !isDeskPicking &&
+      !isAvatarEditorOpen &&
+      !(inCall && meetingStageOpen),
+    useCallback(() => setAvatarBusyHint(true), []),
+  );
+  // ── Multiplayer room: profile (look, status, decoration) ──────
+  const [decorPlacing, setDecorPlacing] = useState<string | null>(null);
+  const status: PersonStatus = profile?.status ?? 'available';
+  const statusText = profile?.statusText ?? '';
+  const decor = useMemo<DeskDecorItem[]>(() => profile?.decor ?? [], [profile]);
+
+  const saveLook = useCallback((look: AvatarLook | null) => {
+    getOfficeState().setLocalProfile({ look });
+    transport.send({ type: 'updateProfile', look });
+    setIsAvatarEditorOpen(false);
+  }, []);
+  const saveStatus = useCallback((next: PersonStatus, text: string) => {
+    getOfficeState().setLocalProfile({ status: next, statusText: text });
+    transport.send({ type: 'updateProfile', status: next, statusText: text });
+  }, []);
+  const saveDecor = useCallback((next: DeskDecorItem[]) => {
+    getOfficeState().setLocalDecor(next);
+    transport.send({ type: 'updateProfile', decor: next });
+  }, []);
+  /** Desk style and the items the room's layout put on the desk that were taken off. */
+  const saveDressing = useCallback((patch: { deskStyle?: string | null; hidden?: string[] }) => {
+    getOfficeState().setLocalDressing(patch);
+    transport.send({ type: 'updateProfile', ...patch });
+  }, []);
+  // What is in hand to move: one of the person's items (put back where it was if
+  // the move is abandoned), or an item that came with the desk (then it comes back).
+  const movingDecorRef = useRef<
+    { kind: 'decor'; item: DeskDecorItem } | { kind: 'layout'; uid: string } | null
+  >(null);
+  const selectDecor = useCallback(
+    (type: string | null) => {
+      const moving = movingDecorRef.current;
+      movingDecorRef.current = null;
+      if (moving?.kind === 'decor') saveDecor([...liveDecor(), moving.item]);
+      if (moving?.kind === 'layout') {
+        const hidden = getOfficeState().getLocalDressing().hidden;
+        saveDressing({ hidden: hidden.filter((u) => u !== moving.uid) });
+      }
+      // Desk items come turned toward the person's chair.
+      setDecorPlacing(type ? getOfficeState().decorVariantForDesk(type) : null);
+    },
+    [saveDecor, saveDressing],
+  );
+  const placeDecor = useCallback(
+    (item: DeskDecorItem) => {
+      if (liveDecor().length >= DECOR_MAX_ITEMS) return;
+      const wasMove = movingDecorRef.current !== null;
+      movingDecorRef.current = null;
+      saveDecor([...liveDecor(), item]);
+      // Keep the item in hand for another copy — unless it was a move, or the desk is full.
+      if (wasMove || liveDecor().length >= DECOR_MAX_ITEMS) setDecorPlacing(null);
+    },
+    [saveDecor],
+  );
+  const pickUpDecor = useCallback(
+    (index: number) => {
+      const items = liveDecor();
+      const item = items[index];
+      if (!item) return;
+      // In hand the way it is drawn (turned round on a desk turned to face the room).
+      const drawnType = getOfficeState().drawnDecorType(item);
+      saveDecor(items.filter((_, i) => i !== index));
+      movingDecorRef.current = { kind: 'decor', item };
+      setDecorPlacing(drawnType);
+    },
+    [saveDecor],
+  );
+  /** Take the room's item (its computer) off the desk: it disappears for everyone. */
+  const hideLayoutItem = useCallback(
+    (uid: string) => {
+      const hidden = getOfficeState().getLocalDressing().hidden;
+      if (!hidden.includes(uid)) saveDressing({ hidden: [...hidden, uid] });
+    },
+    [saveDressing],
+  );
+  /** Take it off and hold it, to put it somewhere else on the desk (as your own). */
+  const takeOffLayoutItem = useCallback(
+    (uid: string, type: string) => {
+      if (liveDecor().length >= DECOR_MAX_ITEMS) {
+        hideLayoutItem(uid);
+        return;
+      }
+      hideLayoutItem(uid);
+      movingDecorRef.current = { kind: 'layout', uid };
+      setDecorPlacing(type);
+    },
+    [hideLayoutItem],
+  );
+  const putBackLayoutItem = useCallback(
+    (uid: string) => {
+      const hidden = getOfficeState().getLocalDressing().hidden;
+      saveDressing({ hidden: hidden.filter((u) => u !== uid) });
+    },
+    [saveDressing],
+  );
+  const applyDeskPreset = useCallback((preset: DeskPreset) => {
+    movingDecorRef.current = null;
+    setDecorPlacing(null);
+    const result = getOfficeState().applyDeskPreset(preset);
+    if (!result) return;
+    transport.send({ type: 'updateProfile', ...result });
+  }, []);
+  const cancelDecorPlacing = useCallback(() => selectDecor(null), [selectDecor]);
+  // Closing the panel (or leaving the room) puts the item in hand away.
+  useEffect(() => {
+    if (sidePanel !== 'decor' || !joined) selectDecor(null);
+  }, [sidePanel, joined, selectDecor]);
+  // Decorating happens at the desk: look at the floor it is on.
+  const { handleViewLevel } = editor;
+  useEffect(() => {
+    if (sidePanel !== 'decor' || !joined) return;
+    const os = getOfficeState();
+    const desk = os.getDesk();
+    const seat = desk ? os.seats.get(desk) : undefined;
+    const level = seat ? os.levelOf({ tileCol: seat.seatCol }) : null;
+    if (level && level.id !== os.getViewLevel().id) handleViewLevel(level.id);
+  }, [sidePanel, joined, handleViewLevel]);
+  const rotateDecor = useCallback(
+    () => setDecorPlacing((t) => (t ? (getRotatedType(t, 'cw') ?? t) : t)),
+    [],
+  );
+  /** The look the editor opens with: the saved one, else today's character. */
+  const editorLook = (): AvatarLook => {
+    if (profile?.look) return profile.look;
+    const os = getOfficeState();
+    const ch = os.avatarId !== null ? os.characters.get(os.avatarId) : undefined;
+    return { ...DEFAULT_LOOK, body: ch?.palette ?? 0 };
+  };
+  const joinMeeting = useCallback(
+    (ev: CalendarEvent) => {
+      if (ev.joinUrl) openUrl(ev.joinUrl);
+      // In the room, the character heads for the meeting place too.
+      if (!joined) return;
+      const os = getOfficeState();
+      const spot = os.meetingSpot();
+      if (spot && os.walkAvatarTo(spot.col, spot.row)) os.cameraFollowId = os.avatarId;
+    },
+    [joined],
+  );
+
+  const handleJoin = useCallback((name: string, room: string, relayUrl?: string) => {
+    transport.send({ type: 'joinRoom', name, room, ...(relayUrl ? { relayUrl } : {}) });
+    setJoinDismissed(true);
+    setDeskPromptPending(true);
+  }, []);
+  const handlePickDesk = useCallback(
+    (seatId: string) => {
+      if (getOfficeState().setDesk(seatId)) {
+        setIsDeskPicking(false);
+        clearDeskLost();
+      }
+    },
+    [clearDeskLost],
+  );
+  const closeDeskPicker = useCallback(() => {
+    setIsDeskPicking(false);
+    clearDeskLost();
+  }, [clearDeskLost]);
+
   const handleCloseAgent = useCallback((id: number) => {
     transport.send({ type: 'closeAgent', id });
   }, []);
@@ -294,10 +644,13 @@ function App() {
           const migrated = migrateLayoutColors(imported as unknown as OfficeLayout);
           getOfficeState().rebuildFromLayout(migrated);
           editor.setLastSavedLayout(migrated);
-          transport.send({
-            type: 'saveLayout',
-            layout: migrated as unknown as Record<string, unknown>,
-          });
+          // In a room, the import replaces the room's map (for everyone in it).
+          if (!roomLayoutSync.localEdit(migrated)) {
+            transport.send({
+              type: 'saveLayout',
+              layout: migrated as unknown as Record<string, unknown>,
+            });
+          }
           editor.markClean();
         } catch {
           window.alert('Failed to read or parse layout file.');
@@ -358,6 +711,32 @@ function App() {
       {!isDebugMode ? (
         <>
           <ZoomControls zoom={editor.zoom} onZoomChange={editor.handleZoomChange} />
+
+          <LevelSwitcher
+            officeState={officeState}
+            isEditMode={editor.isEditMode}
+            onView={editor.handleViewLevel}
+            onAdd={editor.handleAddLevel}
+            onRemove={editor.handleRemoveLevel}
+            onRename={editor.handleRenameLevel}
+            onMove={editor.handleMoveLevel}
+          />
+
+          {editor.isEditMode &&
+            editorState.selectedFurnitureUid &&
+            (() => {
+              const info = portalInfo(officeState.getLayout(), editorState.selectedFurnitureUid);
+              return info ? (
+                <PortalPanel
+                  info={info}
+                  levels={officeState.levels}
+                  onSetStairsTarget={editor.handleSetStairsTarget}
+                  onSetElevatorStop={editor.handleSetElevatorStop}
+                />
+              ) : null;
+            })()}
+
+          {joined && !editor.isEditMode && <ElevatorPicker officeState={officeState} />}
 
           {/* Vignette overlay */}
           <div
@@ -441,6 +820,61 @@ function App() {
             onCloseAgent={handleCloseAgent}
             alwaysShowOverlay={alwaysShowOverlay}
           />
+
+          <ChatBubbles
+            officeState={officeState}
+            bubbles={chatBubbles}
+            containerRef={containerRef}
+            zoom={editor.zoom}
+            panRef={editor.panRef}
+          />
+
+          <EmoteOverlay
+            officeState={officeState}
+            containerRef={containerRef}
+            zoom={editor.zoom}
+            panRef={editor.panRef}
+          />
+
+          {joined && (
+            <NameTags
+              officeState={officeState}
+              selfName={multiplayer?.name ?? ''}
+              badges={meetingBadges}
+              containerRef={containerRef}
+              zoom={editor.zoom}
+              panRef={editor.panRef}
+            />
+          )}
+
+          {joined && sidePanel === 'decor' && (
+            <DecorPlacer
+              officeState={officeState}
+              type={decorPlacing}
+              containerRef={containerRef}
+              zoom={editor.zoom}
+              panRef={editor.panRef}
+              onPlace={placeDecor}
+              onPickUp={pickUpDecor}
+              onRemove={(i) => saveDecor(liveDecor().filter((_, n) => n !== i))}
+              onTakeOff={takeOffLayoutItem}
+              onHide={hideLayoutItem}
+              onRotate={rotateDecor}
+              onCancel={cancelDecorPlacing}
+            />
+          )}
+
+          {joined && isDeskPicking && (
+            <DeskPicker
+              officeState={officeState}
+              containerRef={containerRef}
+              zoom={editor.zoom}
+              panRef={editor.panRef}
+              notice={deskLostTo ? `${deskLostTo} took your desk.` : null}
+              onPick={handlePickDesk}
+              onCancel={closeDeskPicker}
+            />
+          )}
         </>
       ) : (
         <DebugView
@@ -522,7 +956,148 @@ function App() {
         isSettingsOpen={isSettingsOpen}
         onToggleSettings={() => setIsSettingsOpen((v) => !v)}
         workspaceFolders={workspaceFolders}
+        chatEnabled={chatEnabled && joined}
+        isChatOpen={isChatOpen}
+        onToggleChat={() => toggleSidePanel('chat')}
+        sidePanel={sidePanel}
+        onToggleSidePanel={toggleSidePanel}
+        onOpenAvatarEditor={() => setIsAvatarEditorOpen(true)}
+        status={status}
+        statusText={statusText}
+        inMeeting={(calendar?.inMeeting === true && calendar.autoStatus) || inCall}
+        onStatusChange={saveStatus}
+        musicPlaying={spotify?.nowPlaying?.isPlaying === true}
+        chatUnread={chatUnread}
+        inCall={inCall}
+        meetingCount={meeting.meetings.length}
+        multiplayer={multiplayer}
+        layoutEditable={layoutEditable}
+        onOpenJoin={() => setJoinDismissed(false)}
+        onLeaveRoom={() => transport.send({ type: 'leaveRoom' })}
+        onCopyWebLink={isBrowserRuntime ? undefined : () => transport.send({ type: 'copyWebLink' })}
+        onPickDesk={() => setIsDeskPicking((v) => !v)}
+        onEmote={(kind) => {
+          if (!getOfficeState().playEmote(kind)) setAvatarBusyHint(true);
+        }}
       />
+
+      {multiplayer && !joined && !joinDismissed && layoutReady && !intro && (
+        <JoinScreen
+          status={multiplayer}
+          onJoin={handleJoin}
+          onSolo={() => setJoinDismissed(true)}
+        />
+      )}
+
+      {officeInBrowser && (
+        <div
+          className="absolute top-10 left-1/2 -translate-x-1/2 z-40 pixel-panel py-6 px-12 text-sm text-center"
+          style={{ maxWidth: 'calc(100% - 32px)' }}
+          data-testid="office-in-browser"
+        >
+          This office is open in your browser. Your character, walking and meetings are there.
+          <br />
+          <span className="text-text-muted">Close that tab to use this panel again.</span>
+        </div>
+      )}
+
+      {avatarBusyHint && (
+        <div
+          className="absolute bottom-60 left-1/2 -translate-x-1/2 z-30 pixel-panel py-4 px-10 text-sm pointer-events-none"
+          data-testid="avatar-busy-hint"
+        >
+          Claude is working at your desk. You can walk and dance again when it finishes.
+        </div>
+      )}
+
+      {chatEnabled && joined && isChatOpen && (
+        <ChatPanel
+          messages={chatMessages}
+          onSend={(text) => transport.send({ type: 'sendChat', text })}
+          onClose={() => setSidePanel(null)}
+        />
+      )}
+
+      {joined && sidePanel === 'meet' && (
+        <MeetingsPanel
+          m={meeting}
+          selfName={multiplayer?.name ?? ''}
+          onClose={() => setSidePanel(null)}
+        />
+      )}
+
+      {joined && (
+        <MeetingView m={meeting} roomPeople={invitable} onStageChange={setMeetingStageOpen} />
+      )}
+
+      {joined && <MeetingInviteToast m={meeting} />}
+
+      {joined && sidePanel === 'people' && (
+        <PeoplePanel
+          officeState={officeState}
+          selfName={multiplayer?.name ?? ''}
+          remoteCharacters={remoteCharacters}
+          onOpenUrl={openUrl}
+          onClose={() => setSidePanel(null)}
+        />
+      )}
+
+      {joined && sidePanel === 'decor' && (
+        <DecorPanel
+          decor={decor}
+          hasDesk={officeState.getDesk() !== null}
+          selected={decorPlacing}
+          onSelect={selectDecor}
+          onRemove={(i) => saveDecor(liveDecor().filter((_, n) => n !== i))}
+          onClear={() => saveDecor([])}
+          deskStyle={profile?.deskStyle ?? null}
+          onDeskStyle={(deskStyle) => saveDressing({ deskStyle })}
+          takenOff={(profile?.hidden ?? []).flatMap((uid) => {
+            const type = officeState.layoutItemType(uid);
+            return type ? [{ uid, type }] : [];
+          })}
+          onPutBack={putBackLayoutItem}
+          onPreset={applyDeskPreset}
+          onPickDesk={() => setIsDeskPicking(true)}
+          onClose={() => setSidePanel(null)}
+        />
+      )}
+
+      {sidePanel === 'calendar' && (
+        <CalendarPanel
+          calendar={calendar}
+          onConfigure={(change) => transport.send({ type: 'configureCalendar', ...change })}
+          onJoin={joinMeeting}
+          onClose={() => setSidePanel(null)}
+        />
+      )}
+
+      {sidePanel === 'music' && (
+        <MusicPanel
+          spotify={spotify}
+          shareMusic={joined && profile ? profile.shareMusic : null}
+          onCommand={(action, clientId) =>
+            transport.send({ type: 'spotifyCommand', action, ...(clientId ? { clientId } : {}) })
+          }
+          onShareChange={(shareMusic) => transport.send({ type: 'updateProfile', shareMusic })}
+          onOpenUrl={openUrl}
+          onClose={() => setSidePanel(null)}
+        />
+      )}
+
+      {calendar && calendar.events.length > 0 && (
+        <MeetingToast events={calendar.events} onJoin={joinMeeting} />
+      )}
+
+      {isAvatarEditorOpen && (
+        <AvatarEditor
+          initial={editorLook()}
+          hasCustomLook={!!profile?.look}
+          onSave={saveLook}
+          onReset={() => saveLook(null)}
+          onClose={() => setIsAvatarEditorOpen(false)}
+        />
+      )}
 
       <VersionIndicator
         currentVersion={extensionVersion}

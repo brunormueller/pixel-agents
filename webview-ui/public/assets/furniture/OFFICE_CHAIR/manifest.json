@@ -1,0 +1,44 @@
+{
+  "id": "OFFICE_CHAIR",
+  "name": "Office chair",
+  "category": "chairs",
+  "canPlaceOnWalls": false,
+  "canPlaceOnSurfaces": false,
+  "type": "group",
+  "groupType": "rotation",
+  "rotationScheme": "3-way-mirror",
+  "backgroundTiles": 1,
+  "members": [
+    {
+      "type": "asset",
+      "id": "OFFICE_CHAIR_FRONT",
+      "file": "OFFICE_CHAIR_FRONT.png",
+      "width": 16,
+      "height": 32,
+      "footprintW": 1,
+      "footprintH": 2,
+      "orientation": "front"
+    },
+    {
+      "type": "asset",
+      "id": "OFFICE_CHAIR_BACK",
+      "file": "OFFICE_CHAIR_BACK.png",
+      "width": 16,
+      "height": 32,
+      "footprintW": 1,
+      "footprintH": 2,
+      "orientation": "back"
+    },
+    {
+      "type": "asset",
+      "id": "OFFICE_CHAIR_SIDE",
+      "file": "OFFICE_CHAIR_SIDE.png",
+      "width": 16,
+      "height": 32,
+      "footprintW": 1,
+      "footprintH": 2,
+      "orientation": "side",
+      "mirrorSide": true
+    }
+  ]
+}

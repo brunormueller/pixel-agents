@@ -23,7 +23,8 @@ import {
 import { overlayProjection } from '../office/projection.js';
 
 export interface IntroBubbleFrame {
-  layout: { cols: number; rows: number };
+  /** The part of the grid on screen (see projection.ts ViewRect). */
+  layout: { cols: number; rows: number; col?: number; row?: number };
   containerRect: { width: number; height: number };
   zoom: number;
   pan: { x: number; y: number };

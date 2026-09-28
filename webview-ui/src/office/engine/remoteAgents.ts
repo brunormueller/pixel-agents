@@ -4,12 +4,20 @@
 // the server) into characters in THIS office. Pure and structural like
 // existingAgents.ts so it is unit-testable without React.
 //
-// Remote agents are simulated locally: each office has its own layout, so what
-// travels is state (active/waiting, typing/reading, permission), never a
-// position. A remote character takes a free seat here and walks, sits and
-// animates with the same FSM as a local one.
+// Two modes, picked per agent by whether it carries a `pose`:
+// - own layouts (no pose): what travels is state (active/waiting, typing/reading,
+//   permission). A remote character takes a free seat here and walks, sits and
+//   animates with the same FSM as a local one.
+// - shared room map (pose): every office renders the same layout, so the owning
+//   office's position is authoritative; the character follows it, holds none of
+//   our seats, and the desk its office claimed is kept free for it.
 
-import type { RemotePeer } from '../../../../core/src/messages.js';
+import type {
+  DeskDecorItem,
+  PeerProfile,
+  RemotePeer,
+  RemotePose,
+} from '../../../../core/src/messages.js';
 import { REMOTE_AGENT_ID_BASE } from '../../constants.js';
 
 /** Minimal structural view of OfficeState this reconciler needs. */
@@ -22,22 +30,47 @@ export interface RemoteAgentsOffice {
     skipSpawnEffect?: boolean,
   ) => void;
   removeAgent: (id: number) => void;
-  setRemote: (id: number, peerName: string) => void;
+  setRemote: (id: number, peerName: string, peerId?: string) => void;
   setAgentActive: (id: number, active: boolean) => void;
   setAgentTool: (id: number, tool: string | null) => void;
   showPermissionBubble: (id: number) => void;
   clearPermissionBubble: (id: number) => void;
   showWaitingBubble: (id: number, awaitingInput?: boolean) => void;
+  /** Shared room map only (optional so a state-only office fake needs none of it). */
+  setRemotePose?: (
+    id: number,
+    pose: RemotePose,
+    readingTool: string | null,
+    typingTool: string,
+  ) => void;
+  setRemoteAvatar?: (id: number, isAvatar: boolean) => void;
+  setExternalSeatClaims?: (desks: Iterable<string>) => void;
+  /** The person's profile (look, status, song) on their character. */
+  setRemoteProfile?: (id: number, profile: PeerProfile | undefined) => void;
+  setRemoteDecor?: (
+    list: Array<{
+      desk: string | null | undefined;
+      items: DeskDecorItem[] | undefined;
+      deskStyle?: string | null;
+      hidden?: string[];
+    }>,
+  ) => void;
 }
 
 /** A remote character as the overlay needs it. */
 export interface RemoteCharacter {
   id: number;
+  /** The office it belongs to — chat bubbles land on that office's characters. */
+  peerId: string;
   peerName: string;
   status: 'active' | 'waiting';
   activity: 'typing' | 'reading' | null;
   permission: boolean;
   awaitingInput: boolean;
+  /** The office's person (its first agent, or the person alone). */
+  isAvatar: boolean;
+  /** Avatars only: what the person shows about themselves. */
+  profile?: PeerProfile;
 }
 
 export interface RemoteToolNames {
@@ -67,6 +100,18 @@ export class RemoteAgentRegistry {
     return this.current.has(id);
   }
 
+  /** The character that speaks for an office: its person, else its oldest
+   *  character, or null when it shows none. */
+  speakerOf(peerId: string): number | null {
+    let best: number | null = null;
+    for (const c of this.current.values()) {
+      if (c.peerId !== peerId) continue;
+      if (c.isAvatar) return c.id;
+      if (best === null || c.id > best) best = c.id;
+    }
+    return best;
+  }
+
   /**
    * Apply a full snapshot. Before the layout exists there are no seats to take,
    * so the snapshot is held and applied by `flush` on the next layoutLoaded.
@@ -89,7 +134,9 @@ export class RemoteAgentRegistry {
 
     for (const peer of peers) {
       for (const agent of peer.agents) {
-        const key = `${peer.peerId}:${agent.id}`;
+        // The person keeps one character while agents come and go under it (its
+        // id is 0 alone, then the driving agent's): key it by office, not by id.
+        const key = agent.isAvatar ? `${peer.peerId}:avatar` : `${peer.peerId}:${agent.id}`;
         if (seen.has(key)) continue;
         seen.add(key);
 
@@ -100,20 +147,32 @@ export class RemoteAgentRegistry {
           this.ids.set(key, id);
           const palette = paletteCount > 0 ? Math.abs(agent.palette) % paletteCount : 0;
           os.addAgent(id, palette, agent.hueShift);
-          os.setRemote(id, peer.name);
+          os.setRemote(id, peer.name, peer.peerId);
           changed = true;
         }
 
         const next: RemoteCharacter = {
           id,
+          peerId: peer.peerId,
           peerName: peer.name,
           status: agent.status === 'active' ? 'active' : 'waiting',
           activity:
             agent.activity === 'typing' || agent.activity === 'reading' ? agent.activity : null,
           permission: agent.permission === true,
           awaitingInput: agent.awaitingInput === true,
+          isAvatar: agent.isAvatar === true,
         };
+        if (next.isAvatar && peer.profile) next.profile = peer.profile;
         if (applyState(os, prev, next, tools)) changed = true;
+        if (prev?.isAvatar !== next.isAvatar) {
+          os.setRemoteAvatar?.(id, next.isAvatar);
+          changed = true;
+        }
+        if (JSON.stringify(prev?.profile) !== JSON.stringify(next.profile)) {
+          os.setRemoteProfile?.(id, next.profile);
+          changed = true;
+        }
+        if (agent.pose) os.setRemotePose?.(id, agent.pose, tools.reading, tools.typing);
         this.current.set(id, next);
       }
     }
@@ -125,6 +184,19 @@ export class RemoteAgentRegistry {
       os.removeAgent(id);
       changed = true;
     }
+    // Desks the other offices claimed on the shared map stay free for them.
+    const desks: string[] = [];
+    for (const peer of peers) if (peer.desk) desks.push(peer.desk);
+    os.setExternalSeatClaims?.(desks);
+    // Their desk decoration, around those desks.
+    os.setRemoteDecor?.(
+      peers.map((p) => ({
+        desk: p.desk,
+        items: p.profile?.decor,
+        deskStyle: p.profile?.deskStyle ?? null,
+        hidden: p.profile?.hidden,
+      })),
+    );
     return changed;
   }
 

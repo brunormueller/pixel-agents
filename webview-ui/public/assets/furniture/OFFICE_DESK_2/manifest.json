@@ -1,0 +1,13 @@
+{
+  "id": "OFFICE_DESK_2",
+  "name": "Office desk (2 tiles)",
+  "category": "desks",
+  "canPlaceOnWalls": false,
+  "canPlaceOnSurfaces": false,
+  "type": "asset",
+  "width": 32,
+  "height": 32,
+  "footprintW": 2,
+  "footprintH": 2,
+  "backgroundTiles": 1
+}

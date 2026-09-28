@@ -8,6 +8,7 @@ interface CheckboxProps {
 export function Checkbox({ checked, onChange, label, className = '' }: CheckboxProps) {
   return (
     <button
+      type="button"
       onClick={onChange}
       className={`flex items-center justify-between w-full py-6 px-10 bg-transparent border-none rounded-none cursor-pointer text-left hover:bg-btn-bg ${className}`}
     >

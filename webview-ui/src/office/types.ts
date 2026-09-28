@@ -100,6 +100,17 @@ export interface Scoreboard {
   text: string;
 }
 
+/** A label over a character riding stairs or an elevator: which way, to which level. World px. */
+export interface TransitLabel {
+  /** Horizontal center */
+  x: number;
+  /** Baseline (bottom) */
+  y: number;
+  text: string;
+  /** Going up (false: down) */
+  up: boolean;
+}
+
 export const Direction = {
   DOWN: 0,
   LEFT: 1,
@@ -186,6 +197,59 @@ export interface PlacedFurniture {
   row: number;
   /** Optional color override for furniture */
   color?: ColorValue;
+  /** Stairs and elevators: every portal sharing this id is connected to the
+   *  others (a staircase pair, or an elevator's stops). See layout/portals.ts. */
+  link?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEVELS — the floors of a building. Each is a rectangle of the one layout grid
+// (side by side, a VOID column apart); only one is shown at a time. Stairs and
+// elevators (portals) connect them. See layout/levels.ts.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface OfficeLevel {
+  /** Stable id (portals and the view refer to it). */
+  id: string;
+  /** Shown in the level switcher, e.g. "Ground floor". */
+  name: string;
+  /** Height order: higher is upstairs. Going to a higher level goes up. */
+  elevation: number;
+  /** The level's rectangle in the layout grid. */
+  col: number;
+  row: number;
+  cols: number;
+  rows: number;
+}
+
+/** A walk step. `portal` is set on the step reached by taking stairs or an elevator. */
+export interface PathStep {
+  col: number;
+  row: number;
+  portal?: PortalHop;
+}
+
+/** One ride through a portal, as a path step carries it. */
+export interface PortalHop {
+  kind: 'stairs' | 'elevator';
+  /** Elevation difference: > 0 goes up, < 0 goes down. */
+  rise: number;
+  /** Portal furniture uids entered and left. */
+  fromUid: string;
+  toUid: string;
+  /** Level arrived on (for the label shown while riding). */
+  toLevelId: string;
+}
+
+/** A character riding a portal: leaving the source tile (t < 0.5), then arriving (t ≥ 0.5). */
+export interface Transit {
+  hop: PortalHop;
+  /** 0..1 through the ride. */
+  t: number;
+  from: { col: number; row: number };
+  to: { col: number; row: number };
+  /** Moved to `to` (happens at t = 0.5). */
+  arrived: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -232,6 +296,8 @@ export interface OfficeLayout {
   areas?: AreaDefinition[];
   /** Per-tile Area label, parallel to tiles array. null = no area assignment. */
   areaTiles?: Array<string | null>;
+  /** The building's levels. Absent = one level, the whole grid. */
+  levels?: OfficeLevel[];
 }
 
 export interface Character {
@@ -246,9 +312,11 @@ export interface Character {
   /** Current tile row */
   tileRow: number;
   /** Remaining path steps (tile coords) */
-  path: Array<{ col: number; row: number }>;
+  path: PathStep[];
   /** 0-1 lerp between current tile and next tile */
   moveProgress: number;
+  /** Riding stairs or an elevator to another level, or null/absent. */
+  transit?: Transit | null;
   /** Current tool name for typing vs reading animation, or null */
   currentTool: string | null;
   /** Palette index (0-5) */
@@ -317,6 +385,23 @@ export interface Character {
   isRemote?: boolean;
   /** Display name of the office a remote character belongs to. */
   remotePeerName?: string;
+  /** Multiplayer: the person's own character — this office's, or (with isRemote)
+   *  another office's. The office's first Claude agent IS this character. */
+  isAvatar?: boolean;
+  /** Multiplayer, shared room map: where another office says this character
+   *  is. Set = the character follows it instead of running its own FSM. */
+  remoteTarget?: { x: number; y: number; dir: Direction; state: 'idle' | 'walk' | 'type' | 'read' };
+  /** Emote playing (dance, reaction...): a visual layer over the FSM, see engine/emotes.ts. */
+  emote?: { kind: import('./engine/emotes.js').EmoteKind; t: number; seq: number } | null;
+  /** Multiplayer: the look the person picked for their character. Replaces
+   *  palette + hueShift for drawing (see sprites/avatarLook.ts). */
+  look?: import('../../../core/src/messages.js').AvatarLook | null;
+  /** Multiplayer: the person's status, their own status words, and the song they share. */
+  personStatus?: import('../../../core/src/messages.js').PersonStatus;
+  statusText?: string;
+  music?: import('../../../core/src/messages.js').SharedTrack | null;
+  /** Remote characters: the office (relay peer) they belong to. */
+  remotePeerId?: string;
 
   // -- Agent Teams --
   /** Team name this agent belongs to */

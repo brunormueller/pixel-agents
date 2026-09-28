@@ -1,17 +1,33 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { HooksConsentRequest, RemotePeer } from '../../../core/src/messages.js';
-import { REMOTE_TYPING_TOOL_NAME } from '../constants.js';
+import type {
+  CalendarState,
+  ChatEntry,
+  HooksConsentRequest,
+  MultiplayerStatus,
+  ProfileLoaded,
+  RemotePeer,
+  SpotifyStatus,
+} from '../../../core/src/messages.js';
+import {
+  CHAT_HISTORY_LIMIT,
+  PRESENCE_SEND_INTERVAL_MS,
+  REMOTE_TYPING_TOOL_NAME,
+} from '../constants.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
+import type { ChatBubble } from '../office/engine/chat.js';
+import { bubbleDurationMs, pickLocalSpeaker, pushBubble } from '../office/engine/chat.js';
 import type { ExistingAgentMeta, PendingAgent } from '../office/engine/existingAgents.js';
 import { reconcileExistingAgents } from '../office/engine/existingAgents.js';
 import type { OfficeState } from '../office/engine/officeState.js';
+import { collectPresence, loseDeskTo } from '../office/engine/presence.js';
 import type { RemoteCharacter, RemoteToolNames } from '../office/engine/remoteAgents.js';
 import { RemoteAgentRegistry } from '../office/engine/remoteAgents.js';
 import { setGhostHeadlessAgents as setRendererGhostHeadlessAgents } from '../office/engine/renderer.js';
 import { setFloorSprites } from '../office/floorTiles.js';
 import { buildDynamicCatalog } from '../office/layout/furnitureCatalog.js';
 import { migrateLayoutColors } from '../office/layout/layoutSerializer.js';
+import type { RoomLayoutRejectReason, RoomLayoutSync } from '../office/layout/roomLayoutSync.js';
 import { setCarpetSprites } from '../office/sprites/carpetTiles.js';
 import { setPetTemplates } from '../office/sprites/petSpriteData.js';
 import { getLoadedCharacterCount, setCharacterTemplates } from '../office/sprites/spriteData.js';
@@ -67,6 +83,14 @@ interface FurnitureAsset {
   frame?: number;
 }
 
+/** A `roomLayout` message. `rev` = the map is everyone's (null: an older relay's, creator-only). */
+interface RoomLayoutUpdate {
+  layout: OfficeLayout | null;
+  editable: boolean;
+  rev: number | null;
+  editId?: string;
+}
+
 export interface WorkspaceFolder {
   name: string;
   path: string;
@@ -81,6 +105,27 @@ interface ExtensionMessageState {
   subagentCharacters: SubagentCharacter[];
   /** Other offices' agents in the multiplayer room (empty when multiplayer is off). */
   remoteCharacters: RemoteCharacter[];
+  /** Multiplayer chat is available: the server replayed a chatHistory (only sent when multiplayer is configured). */
+  chatEnabled: boolean;
+  /** Room chat, oldest first, capped at CHAT_HISTORY_LIMIT. */
+  chatMessages: ChatEntry[];
+  /** Live speech bubbles over the characters that spoke. */
+  chatBubbles: ChatBubble[];
+  /** Multiplayer room state; null when no relay is configured (no join screen). */
+  multiplayer: MultiplayerStatus | null;
+  /** False while this office shows someone else's room layout. */
+  layoutEditable: boolean;
+  /** VS Code: this office is open in a browser page, which is the person's page meanwhile. */
+  officeInBrowser: boolean;
+  /** Name of the office that took our desk (it joined first); the UI asks for another. */
+  deskLostTo: string | null;
+  clearDeskLost: () => void;
+  /** This office's saved profile (look, status, desk decoration, music sharing); null without multiplayer. */
+  profile: ProfileLoaded | null;
+  /** Calendar feeds and the next events; null until the server reported. */
+  calendar: CalendarState | null;
+  /** Spotify connection and what is playing; null until the server reported. */
+  spotify: SpotifyStatus | null;
   layoutReady: boolean;
   layoutWasReset: boolean;
   loadedAssets?: { catalog: FurnitureAsset[]; sprites: Record<string, string[][]> };
@@ -126,6 +171,8 @@ export function useExtensionMessages(
   getOfficeState: () => OfficeState,
   onLayoutLoaded?: (layout: OfficeLayout) => void,
   isEditDirty?: () => boolean,
+  /** A room map everyone edits: its revisions go through here (it puts them on screen). */
+  roomLayoutSync?: RoomLayoutSync,
 ): ExtensionMessageState {
   const [agents, setAgents] = useState<number[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<number | null>(null);
@@ -136,6 +183,17 @@ export function useExtensionMessages(
   >({});
   const [subagentCharacters, setSubagentCharacters] = useState<SubagentCharacter[]>([]);
   const [remoteCharacters, setRemoteCharacters] = useState<RemoteCharacter[]>([]);
+  const [chatEnabled, setChatEnabled] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatEntry[]>([]);
+  const [chatBubbles, setChatBubbles] = useState<ChatBubble[]>([]);
+  const [multiplayer, setMultiplayer] = useState<MultiplayerStatus | null>(null);
+  const [layoutEditable, setLayoutEditable] = useState(true);
+  const [officeInBrowser, setOfficeInBrowser] = useState(false);
+  const officeInBrowserRef = useRef(false);
+  const [deskLostTo, setDeskLostTo] = useState<string | null>(null);
+  const [profile, setProfile] = useState<ProfileLoaded | null>(null);
+  const [calendar, setCalendar] = useState<CalendarState | null>(null);
+  const [spotify, setSpotify] = useState<SpotifyStatus | null>(null);
   const [layoutReady, setLayoutReady] = useState(false);
   const [layoutWasReset, setLayoutWasReset] = useState(false);
   const [loadedAssets, setLoadedAssets] = useState<
@@ -175,6 +233,18 @@ export function useExtensionMessages(
   // Multiplayer: (peerId, remote agent id) → local character. Lives for the
   // panel's lifetime so a character keeps its id (and seat) across snapshots.
   const remoteRegistryRef = useRef(new RemoteAgentRegistry());
+  const chatBubbleKeyRef = useRef(0);
+  // Multiplayer room. While joined as a guest the office shows the ROOM's layout;
+  // this office's own is kept aside (and kept current from layoutLoaded) so
+  // leaving puts it back without a round trip.
+  const joinedRef = useRef(false);
+  const mySinceRef = useRef(0);
+  const guestLayoutRef = useRef(false);
+  const localLayoutRef = useRef<OfficeLayout | null>(null);
+  const pendingRoomLayoutRef = useRef<RoomLayoutUpdate | null>(null);
+  // The song on the person's character: what Spotify plays, while they share it.
+  const shareMusicRef = useRef(false);
+  const nowPlayingRef = useRef<SpotifyStatus['nowPlaying']>(null);
 
   // Live background spawn tools per agent (runInBackground agentToolStart, or a
   // lazily-created watched sub). Their sub-characters outlive the parent's turn:
@@ -198,6 +268,58 @@ export function useExtensionMessages(
       reading: anyReadingToolName(),
       typing: REMOTE_TYPING_TOOL_NAME,
     });
+
+    const asLayout = (raw: unknown): OfficeLayout | null => {
+      const layout = raw as OfficeLayout | null;
+      return layout && layout.version === 1 ? migrateLayoutColors(layout) : null;
+    };
+
+    const syncLocalMusic = (os: OfficeState) => {
+      const np = nowPlayingRef.current;
+      os.setLocalProfile({
+        music:
+          shareMusicRef.current && np?.isPlaying
+            ? {
+                title: np.title,
+                artist: np.artist,
+                ...(np.trackUrl ? { trackUrl: np.trackUrl } : {}),
+              }
+            : null,
+      });
+    };
+
+    // Joined = the person has a character; left = it goes.
+    const syncAvatar = (os: OfficeState) => {
+      if (!layoutReadyRef.current) return;
+      if (joinedRef.current) os.ensureAvatar();
+      else os.removeAvatar();
+    };
+
+    const applyRoomLayout = (os: OfficeState, room: RoomLayoutUpdate) => {
+      setLayoutEditable(room.editable);
+      if (room.layout) {
+        if (!guestLayoutRef.current) localLayoutRef.current = os.getLayout();
+        guestLayoutRef.current = true;
+        if (room.rev !== null && roomLayoutSync) {
+          roomLayoutSync.receive(room.layout, room.rev, room.editId);
+        } else {
+          // An older relay's map: only the room's creator edits it.
+          roomLayoutSync?.reset();
+          os.rebuildFromLayout(room.layout);
+          onLayoutLoaded?.(room.layout);
+        }
+      } else if (guestLayoutRef.current) {
+        roomLayoutSync?.reset();
+        guestLayoutRef.current = false;
+        const local = localLayoutRef.current;
+        localLayoutRef.current = null;
+        if (local) {
+          os.rebuildFromLayout(local);
+          onLayoutLoaded?.(local);
+        }
+      }
+      syncAvatar(os);
+    };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handler = (msg: any) => {
@@ -232,6 +354,12 @@ export function useExtensionMessages(
       }
 
       if (msg.type === 'layoutLoaded') {
+        // Showing a room's layout: this office's own changed underneath — keep it
+        // for when we leave, don't swap the shared map out from under everyone.
+        if (layoutReadyRef.current && guestLayoutRef.current) {
+          localLayoutRef.current = asLayout(msg.layout) ?? localLayoutRef.current;
+          return;
+        }
         // Skip external layout updates while editor has unsaved changes
         if (layoutReadyRef.current && isEditDirty?.()) {
           console.log('[Webview] Skipping external layout update — editor has unsaved changes');
@@ -258,22 +386,106 @@ export function useExtensionMessages(
         }
         layoutReadyRef.current = true;
         setLayoutReady(true);
+        // A room layout that arrived before the first layout waits for it.
+        const pendingRoom = pendingRoomLayoutRef.current;
+        pendingRoomLayoutRef.current = null;
+        if (pendingRoom) applyRoomLayout(os, pendingRoom);
+        else syncAvatar(os);
         if (msg.wasReset) {
           setLayoutWasReset(true);
         }
         if (os.characters.size > 0) {
           saveAgentSeats(os);
         }
+      } else if (msg.type === 'multiplayerStatus') {
+        const status = msg as MultiplayerStatus;
+        setMultiplayer(status);
+        joinedRef.current = status.joined;
+        mySinceRef.current = status.since ?? 0;
+        syncAvatar(os);
+      } else if (msg.type === 'roomLayout') {
+        const room: RoomLayoutUpdate = {
+          layout: asLayout(msg.layout),
+          editable: msg.editable !== false,
+          rev: typeof msg.rev === 'number' ? msg.rev : null,
+          editId: typeof msg.editId === 'string' ? msg.editId : undefined,
+        };
+        // Before the first layout only the newest map matters: it arrives as a fresh one.
+        if (!layoutReadyRef.current) pendingRoomLayoutRef.current = { ...room, editId: undefined };
+        else applyRoomLayout(os, room);
+      } else if (msg.type === 'officeInBrowser') {
+        officeInBrowserRef.current = msg.open === true;
+        setOfficeInBrowser(msg.open === true);
+      } else if (msg.type === 'roomLayoutRejected') {
+        roomLayoutSync?.rejected(String(msg.editId), msg.reason as RoomLayoutRejectReason);
       } else if (msg.type === 'remotePeers') {
         const registry = remoteRegistryRef.current;
+        const peers = (Array.isArray(msg.peers) ? msg.peers : []) as RemotePeer[];
+        // Someone who joined first holds our desk: give it up BEFORE their claim
+        // is applied below, and ask the person for another.
+        const winner = loseDeskTo(os.getDesk(), mySinceRef.current, peers);
+        if (winner) {
+          os.setDesk(null);
+          setDeskLostTo(winner.name);
+        }
         const changed = registry.reconcile(
           os,
-          (Array.isArray(msg.peers) ? msg.peers : []) as RemotePeer[],
+          peers,
           layoutReadyRef.current,
           getLoadedCharacterCount(),
           remoteToolNames(),
         );
         if (changed) setRemoteCharacters(registry.characters());
+      } else if (msg.type === 'chatHistory') {
+        // History only: replayed lines already had their moment, no bubbles.
+        setChatEnabled(true);
+        const messages = (Array.isArray(msg.messages) ? msg.messages : []) as ChatEntry[];
+        setChatMessages(messages.slice(-CHAT_HISTORY_LIMIT));
+      } else if (msg.type === 'chatMessage') {
+        const entry = msg.message as ChatEntry | undefined;
+        if (!entry || typeof entry.text !== 'string') return;
+        setChatEnabled(true);
+        setChatMessages((prev) => [...prev, entry].slice(-CHAT_HISTORY_LIMIT));
+        const speaker = entry.self
+          ? (os.avatarId ?? pickLocalSpeaker(os.characters.keys(), os.selectedAgentId))
+          : remoteRegistryRef.current.speakerOf(entry.peerId);
+        if (speaker !== null) {
+          const now = Date.now();
+          const bubble: ChatBubble = {
+            key: chatBubbleKeyRef.current++,
+            charId: speaker,
+            text: entry.text,
+            startedAt: now,
+            durationMs: bubbleDurationMs(entry.text),
+          };
+          setChatBubbles((prev) => pushBubble(prev, bubble, now));
+        }
+      } else if (msg.type === 'profileLoaded') {
+        const p = msg as ProfileLoaded;
+        setProfile(p);
+        os.setLocalProfile({
+          look: p.look ?? null,
+          status: p.status,
+          statusText: p.statusText,
+        });
+        os.setLocalDecor(Array.isArray(p.decor) ? p.decor : []);
+        os.setLocalDressing({
+          deskStyle: p.deskStyle ?? null,
+          hidden: Array.isArray(p.hidden) ? p.hidden : [],
+        });
+        shareMusicRef.current = p.shareMusic === true;
+        syncLocalMusic(os);
+      } else if (msg.type === 'calendarState') {
+        setCalendar(msg as CalendarState);
+      } else if (msg.type === 'spotifyStatus') {
+        const status = msg as SpotifyStatus;
+        setSpotify(status);
+        nowPlayingRef.current = status.nowPlaying ?? null;
+        syncLocalMusic(os);
+      } else if (msg.type === 'openExternalUrl') {
+        // Standalone: the server asks this page to open a sign-in in a new tab.
+        const url = typeof msg.url === 'string' ? msg.url : '';
+        if (url.startsWith('https://')) window.open(url, '_blank', 'noopener,noreferrer');
       } else if (msg.type === 'agentCreated') {
         const id = msg.id as number;
         const folderName = msg.folderName as string | undefined;
@@ -768,8 +980,33 @@ export function useExtensionMessages(
       }
     };
     const unsubscribe = transport.onMessage(handler);
+
+    // Multiplayer: report where this office's characters stand on the shared
+    // map, and its desk. Only when something changed; the server folds it into
+    // what it publishes (and drops the poses when the room has no shared map).
+    let lastPresence = '';
+    const presenceTimer = setInterval(() => {
+      // Open in a browser page (VS Code): that page reports the person's character.
+      if (!joinedRef.current || !layoutReadyRef.current || officeInBrowserRef.current) {
+        lastPresence = '';
+        return;
+      }
+      const os = getOfficeState();
+      const message = {
+        type: 'presenceUpdate' as const,
+        characters: collectPresence(os.characters.values(), os.avatarId),
+        desk: os.getDesk(),
+      };
+      const json = JSON.stringify(message);
+      if (json === lastPresence) return;
+      lastPresence = json;
+      transport.send(message);
+    }, PRESENCE_SEND_INTERVAL_MS);
     transport.send({ type: 'webviewReady' });
-    return unsubscribe;
+    return () => {
+      clearInterval(presenceTimer);
+      unsubscribe();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getOfficeState]);
 
@@ -796,6 +1033,17 @@ export function useExtensionMessages(
     subagentTools,
     subagentCharacters,
     remoteCharacters,
+    chatEnabled,
+    chatMessages,
+    chatBubbles,
+    multiplayer,
+    layoutEditable,
+    officeInBrowser,
+    deskLostTo,
+    clearDeskLost: useCallback(() => setDeskLostTo(null), []),
+    profile,
+    calendar,
+    spotify,
     layoutReady,
     layoutWasReset,
     loadedAssets,

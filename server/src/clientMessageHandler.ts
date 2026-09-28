@@ -4,6 +4,7 @@ import { buildAgentDiagnostics } from './agentDiagnostics.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
+import type { ConfigNamespace } from './configPersistence.js';
 import {
   getHooksConsent,
   getHooksEnabled,
@@ -12,6 +13,7 @@ import {
   writeConfig,
 } from './configPersistence.js';
 import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from './constants.js';
+import type { Integrations } from './integrations/index.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
 import type { MultiplayerClient } from './multiplayer/multiplayerClient.js';
 import type { ConsentEffects } from './providers/hook/consentExecutor.js';
@@ -55,6 +57,8 @@ export interface ClientMessageContext {
   onReloadAssets?: ReloadAssetsSideEffect;
   /** Multiplayer relay client; its remote peers are replayed on webviewReady. */
   multiplayer?: MultiplayerClient;
+  /** Calendar + Spotify; their state is replayed on webviewReady. */
+  integrations?: Integrations;
   /**
    * Whether this client may send messages that reach OUTSIDE `~/.pixel-agents/`
    * — today only `setHooksEnabled`, which grants machine-wide consent to modify
@@ -63,6 +67,15 @@ export interface ClientMessageContext {
    * to false so a caller that forgets to pass it gets the safe answer.
    */
   privileged?: boolean;
+  /**
+   * The page belongs to an office whose HOST owns agent restore and hooks — a VS
+   * Code window opened in a browser (its web view). The handshake then restores
+   * no agents and asks no hooks consent, and hooks toggles answer with the
+   * truth instead of installing: VS Code installs them, with its own server.
+   */
+  hostOwned?: boolean;
+  /** Whose settings (area mappings) this page reads and writes. Default 'standalone'. */
+  configNamespace?: ConfigNamespace;
 }
 
 // ── Setting key constants (mirror adapters/vscode/constants.ts) ──
@@ -115,7 +128,16 @@ export function handleClientMessage(
 
     case 'saveLayout':
       if (msg.layout) {
+        // In a multiplayer room the map on screen is the ROOM's (its edits go
+        // out as saveRoomLayout): saving it would overwrite this office's own.
+        if (ctx.multiplayer?.showsRoomLayout()) {
+          console.warn(
+            '[Pixel Agents] Ignoring saveLayout while showing a multiplayer room layout.',
+          );
+          break;
+        }
         writeLayoutToFile(msg.layout as Record<string, unknown>);
+        ctx.multiplayer?.onLocalLayoutSaved(msg.layout as Record<string, unknown>);
       }
       break;
 
@@ -188,6 +210,13 @@ export function handleClientMessage(
       // id names nothing to install into, so it is dropped like a junk choice.
       const provider = hookProviderById(msg.providerId);
       if (!provider) break;
+      if (ctx.hostOwned) {
+        console.warn('[Pixel Agents] Hooks are managed by the VS Code panel, not its web view.');
+        void provider
+          .areHooksInstalled()
+          .then((installed) => send({ type: 'hooksStatus', providerId: provider.id, installed }));
+        break;
+      }
       if (!ctx.privileged) {
         // No server token on this connection: the toggle would grant durable
         // consent to modify a settings file on THIS machine, and only the
@@ -209,7 +238,8 @@ export function handleClientMessage(
     case 'hooksConsentResponse': {
       // Privilege: the request is only ever sent to tokened connections, so a
       // response from an untokened one is a crafted message — ignored, same
-      // reasoning as setHooksEnabled above.
+      // reasoning as setHooksEnabled above. A web view never asks (hostOwned).
+      if (ctx.hostOwned) break;
       if (!ctx.privileged) {
         console.warn(
           '[Pixel Agents] Ignoring hooksConsentResponse from an untokened client — installing hooks needs approval from this machine (open the tokened URL the CLI printed).',
@@ -262,7 +292,10 @@ export function handleClientMessage(
         break;
       }
       const cfg = readConfig();
-      cfg.standalone.areaMappings = rawMappings as Record<string, string[]>;
+      cfg[ctx.configNamespace ?? 'standalone'].areaMappings = rawMappings as Record<
+        string,
+        string[]
+      >;
       writeConfig(cfg);
       break;
     }
@@ -272,6 +305,77 @@ export function handleClientMessage(
       adapter?.setSetting(KEY_SHOW_AREAS, enabled);
       break;
     }
+
+    case 'sendChat':
+      // Speaking as this office in someone else's office: an untokened
+      // watcher (or a DNS-rebound page) must not be able to put words in the
+      // operator's mouth, same gate as the hooks toggle.
+      if (!ctx.privileged) {
+        console.warn(
+          '[Pixel Agents] Ignoring sendChat from an untokened client — open the tokened URL the CLI printed to chat.',
+        );
+        break;
+      }
+      ctx.multiplayer?.sendChat(msg.text);
+      break;
+
+    // Joining, leaving and moving are this office acting in the room — the same
+    // "speaks as the operator" gate as chat.
+    case 'joinRoom':
+    case 'leaveRoom':
+    case 'presenceUpdate':
+      if (!ctx.privileged) {
+        console.warn(`[Pixel Agents] Ignoring ${msg.type} from an untokened client.`);
+        break;
+      }
+      if (msg.type === 'joinRoom') ctx.multiplayer?.join(msg.room, msg.name, msg.relayUrl);
+      else if (msg.type === 'leaveRoom') ctx.multiplayer?.leave();
+      else ctx.multiplayer?.setPresence(msg.characters, msg.desk);
+      break;
+
+    // Editing the room's map changes it for everyone in the room: same gate.
+    // The refusal goes to this page only, so it stops waiting for its edit.
+    case 'saveRoomLayout':
+      if (!ctx.privileged) {
+        console.warn('[Pixel Agents] Ignoring saveRoomLayout from an untokened client.');
+        send({ type: 'roomLayoutRejected', editId: msg.editId, rev: 0, reason: 'forbidden' });
+        break;
+      }
+      ctx.multiplayer?.editRoomLayout(msg.layout, msg.base, msg.editId);
+      break;
+
+    // The person's profile, calendar feeds (read credentials), Spotify account
+    // and Claude Code: all of them act as, or read for, the operator.
+    case 'updateProfile':
+    case 'configureCalendar':
+    case 'spotifyCommand':
+    case 'generateMeetingNotes':
+      if (!ctx.privileged) {
+        console.warn(`[Pixel Agents] Ignoring ${msg.type} from an untokened client.`);
+        break;
+      }
+      if (msg.type === 'updateProfile') ctx.multiplayer?.updateProfile(msg);
+      else ctx.integrations?.handle(msg, send);
+      break;
+
+    // Meetings: being in a call, and speaking in it, is the operator's camera,
+    // microphone and words — the same gate as chat.
+    case 'updateMeetingPresence':
+    case 'sendMeetingSignal':
+    case 'sendMeetingEvent':
+      if (!ctx.privileged) {
+        console.warn(`[Pixel Agents] Ignoring ${msg.type} from an untokened client.`);
+        break;
+      }
+      if (msg.type === 'updateMeetingPresence') ctx.multiplayer?.setMeeting(msg.meeting);
+      else if (msg.type === 'sendMeetingSignal')
+        ctx.multiplayer?.sendMeetingSignal(msg.to, msg.data);
+      else ctx.multiplayer?.sendMeetingEvent(msg.event);
+      break;
+
+    case 'openExternal':
+      // The standalone page opens links in the browser itself; nothing to do here.
+      break;
 
     default:
       // focusAgent, exportLayout, importLayout
@@ -455,7 +559,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
             installed,
             hooksEnabled: getHooksEnabled(provider.id),
             consentAnswered: getHooksConsent(provider.id) !== 'unanswered',
-            privileged: ctx.privileged === true,
+            privileged: ctx.privileged === true && !ctx.hostOwned,
           },
           provider,
         );
@@ -467,7 +571,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   // webview seat-preference logic has the dict when characters are created).
   send({
     type: 'areaMappingsLoaded',
-    mappings: cfg.standalone.areaMappings ?? {},
+    mappings: cfg[ctx.configNamespace ?? 'standalone'].areaMappings ?? {},
   });
 
   // Sync runtime refs with the persisted settings so scanners behave correctly
@@ -478,7 +582,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   }
 
   // 5. Restore persisted external agents (standalone only; VS Code handles its own restore)
-  runtime?.restoreExternalAgents();
+  if (!ctx.hostOwned) runtime?.restoreExternalAgents();
 
   // 6. Existing agents (either just restored, or from VS Code adapter if present)
   const agentIds: number[] = [];
@@ -522,4 +626,7 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
   // 9. Other people's agents (multiplayer), also after layoutLoaded so their
   // characters have seats to take.
   ctx.multiplayer?.resend(send);
+
+  // 10. The person's calendar and music.
+  ctx.integrations?.resend(send);
 }

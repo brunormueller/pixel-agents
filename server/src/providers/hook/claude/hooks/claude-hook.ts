@@ -5,6 +5,7 @@ import * as path from 'path';
 
 import {
   HOOK_API_PREFIX,
+  PIXEL_AGENTS_SKIP_HOOK_ENV,
   SERVER_JSON_DIR,
   SERVER_JSON_NAME,
   SERVERS_DIR,
@@ -149,6 +150,11 @@ function postToServer(
 }
 
 async function main(): Promise<void> {
+  // A `claude -p` Pixel Agents started itself (meeting notes) is not an agent to draw.
+  if (process.env[PIXEL_AGENTS_SKIP_HOOK_ENV] === '1') {
+    hookDebug('exit reason=skip-env');
+    return;
+  }
   let input = '';
   for await (const chunk of process.stdin) input += chunk;
 

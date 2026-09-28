@@ -18,6 +18,7 @@ import {
   SERVERS_DIR,
 } from './constants.js';
 import { createHttpServer } from './httpServer.js';
+import type { Integrations } from './integrations/index.js';
 import type { MultiplayerClient } from './multiplayer/multiplayerClient.js';
 import type { ServerConfig } from './serverConfig.js';
 import { isServerConfig, isServerTarget } from './serverConfig.js';
@@ -71,6 +72,7 @@ export class PixelAgentsServer {
     onSetHooksEnabled?: SetHooksEnabledSideEffect;
     onReloadAssets?: ReloadAssetsSideEffect;
     multiplayer?: MultiplayerClient;
+    integrations?: Integrations;
     /** false = always start our own server, even when a compatible one is running. A multiplayer office needs its
      *  own: reusing another's would show that office's agents under this one's page. Default true. */
     reuseExisting?: boolean;
@@ -113,6 +115,7 @@ export class PixelAgentsServer {
       onSetHooksEnabled: options?.onSetHooksEnabled,
       onReloadAssets: options?.onReloadAssets,
       multiplayer: options?.multiplayer,
+      integrations: options?.integrations,
     });
 
     this.app = app;

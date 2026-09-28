@@ -397,3 +397,19 @@ export function getOrientationInGroup(type: string): string | undefined {
   }
   return undefined;
 }
+
+/**
+ * The member of `type`'s rotation group facing `orientation` ('front', 'right',
+ * 'back', 'left' — 'left' is the mirrored side), or `type` itself when it has no
+ * such member (or no group at all).
+ */
+export function getVariantForOrientation(type: string, orientation: string): string {
+  return rotationGroups.get(type)?.members[orientation] ?? type;
+}
+
+/** The front-facing member of `type`'s rotation group (the one catalogs list), or `type` itself. */
+export function getFrontVariant(type: string): string {
+  const group = rotationGroups.get(type);
+  if (!group) return type;
+  return group.members.front ?? group.members[group.orientations[0]] ?? type;
+}

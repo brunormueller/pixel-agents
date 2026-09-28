@@ -68,16 +68,18 @@ test('a new remote agent becomes a character marked remote, with its palette', (
 
   assert.deepEqual(calls.slice(0, 2), [
     ['addAgent', REMOTE_AGENT_ID_BASE, 2, 0],
-    ['setRemote', REMOTE_AGENT_ID_BASE, 'Alice'],
+    ['setRemote', REMOTE_AGENT_ID_BASE, 'Alice', 'p1'],
   ]);
   assert.deepEqual(reg.characters(), [
     {
       id: REMOTE_AGENT_ID_BASE,
+      peerId: 'p1',
       peerName: 'Alice',
       status: 'waiting',
       activity: null,
       permission: false,
       awaitingInput: false,
+      isAvatar: false,
     },
   ]);
   assert.equal(reg.isRemote(REMOTE_AGENT_ID_BASE), true);
@@ -179,4 +181,23 @@ test('a palette index beyond the loaded palettes wraps instead of breaking the s
   const reg = new RemoteAgentRegistry();
   reg.reconcile(os, [peer('p1', [agent({ palette: 9 })])], true, PALETTES, TOOLS);
   assert.deepEqual(calls[0], ['addAgent', REMOTE_AGENT_ID_BASE, 3, 0]);
+});
+
+test('speakerOf names the oldest character of an office, or null when it shows none', () => {
+  const { os } = fakeOffice();
+  const reg = new RemoteAgentRegistry();
+  reg.reconcile(
+    os,
+    [peer('p1', [agent({ id: 1 }), agent({ id: 2 })]), peer('p2', [])],
+    true,
+    PALETTES,
+    TOOLS,
+  );
+  assert.equal(reg.speakerOf('p1'), REMOTE_AGENT_ID_BASE);
+  assert.equal(reg.speakerOf('p2'), null);
+  assert.equal(reg.speakerOf('gone'), null);
+
+  // Its oldest agent leaves: the next one speaks for the office.
+  reg.reconcile(os, [peer('p1', [agent({ id: 2 })])], true, PALETTES, TOOLS);
+  assert.equal(reg.speakerOf('p1'), REMOTE_AGENT_ID_BASE - 1);
 });
