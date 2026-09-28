@@ -250,7 +250,7 @@ export async function launchVSCode(
   fs.mkdirSync(userSettingsDir, { recursive: true });
   const userSettings: Record<string, unknown> = {
     'workbench.panel.defaultLocation': 'left',
-    'pixel-agents.autoShowPanel': true,
+    'pixel-agents-cloud.autoShowPanel': true,
     'terminal.integrated.defaultLocation': 'editor',
     'workbench.activityBar.location': 'hidden',
     'workbench.startupEditor': 'none',
