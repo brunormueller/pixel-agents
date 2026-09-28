@@ -33,10 +33,10 @@ export const GLOBAL_KEY_SHOW_AREAS = 'pixel-agents.showAreas';
 export const SETTING_KEY_AREA_MAPPINGS = 'pixel-agents.areaMappings';
 
 // ── VS Code Settings (contributes.configuration keys) ───────
-export const CONFIG_KEY_AUTO_SHOW_PANEL = 'pixel-agents.autoShowPanel';
-export const CONFIG_KEY_AUTO_SPAWN_AGENT = 'pixel-agents.autoSpawnAgent';
+export const CONFIG_KEY_AUTO_SHOW_PANEL = 'pixel-agents-cloud.autoShowPanel';
+export const CONFIG_KEY_AUTO_SPAWN_AGENT = 'pixel-agents-cloud.autoSpawnAgent';
 
 // ── VS Code Identifiers ─────────────────────────────────────
-export const VIEW_ID = 'pixel-agents.panelView';
-export const COMMAND_SHOW_PANEL = 'pixel-agents.showPanel';
-export const COMMAND_EXPORT_DEFAULT_LAYOUT = 'pixel-agents.exportDefaultLayout';
+export const VIEW_ID = 'pixel-agents-cloud.panelView';
+export const COMMAND_SHOW_PANEL = 'pixel-agents-cloud.showPanel';
+export const COMMAND_EXPORT_DEFAULT_LAYOUT = 'pixel-agents-cloud.exportDefaultLayout';

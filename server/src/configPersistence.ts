@@ -2,7 +2,25 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { CONFIG_FILE_NAME, LAYOUT_FILE_DIR } from './constants.js';
+import {
+  CONFIG_FILE_NAME,
+  LAYOUT_FILE_DIR,
+  MULTIPLAYER_FILE_NAME,
+  MULTIPLAYER_PROFILE_FILE_NAME,
+} from './constants.js';
+import type { MultiplayerSettings } from './multiplayer/multiplayerClient.js';
+import type { AvatarLook, DeskDecorItem, PersonStatus } from './multiplayer/protocol.js';
+import {
+  sanitizeDecor,
+  sanitizeDesks,
+  sanitizeDeskStyle,
+  sanitizeHidden,
+  sanitizeIceServers,
+  sanitizeLook,
+  sanitizeRelayUrl,
+  sanitizeStatus,
+  sanitizeStatusText,
+} from './multiplayer/protocol.js';
 
 export interface AdapterSettings {
   soundEnabled: boolean;
@@ -181,6 +199,155 @@ export function readConfig(): PixelAgentsConfig {
       hooksEnabled: {},
     };
   }
+}
+
+const nonEmpty = (v: unknown): string | undefined =>
+  typeof v === 'string' && v.trim() !== '' ? v : undefined;
+
+/** Coerce the hand-written multiplayer.json. The URL must be ws:// or wss://; anything else reads as "multiplayer
+ *  off" rather than a half-configured connection. `room` and `displayName` are optional: they only prefill the join
+ *  screen, which is where a room is actually entered. */
+export function parseMultiplayer(raw: unknown): MultiplayerSettings | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const { relayUrl, room, displayName, iceServers } = raw as Record<string, unknown>;
+  if (typeof relayUrl !== 'string' || !/^wss?:\/\//i.test(relayUrl)) return undefined;
+  const settings: MultiplayerSettings = {
+    relayUrl,
+    room: nonEmpty(room),
+    displayName: nonEmpty(displayName),
+  };
+  const ice = sanitizeIceServers(iceServers);
+  if (ice.length > 0) settings.iceServers = ice;
+  return settings;
+}
+
+/** multiplayer.json's `iceServers` alone (STUN/TURN for meetings) — for an office
+ *  whose relay came from the command line. Empty when absent or unreadable. */
+export function readMultiplayerIceServers(): MultiplayerSettings['iceServers'] {
+  try {
+    const raw = JSON.parse(
+      fs.readFileSync(path.join(os.homedir(), LAYOUT_FILE_DIR, MULTIPLAYER_FILE_NAME), 'utf-8'),
+    ) as Record<string, unknown>;
+    return sanitizeIceServers(raw?.iceServers);
+  } catch {
+    return [];
+  }
+}
+
+function multiplayerProfilePath(): string {
+  return path.join(os.homedir(), LAYOUT_FILE_DIR, MULTIPLAYER_PROFILE_FILE_NAME);
+}
+
+/** Who the person is in a room, machine-wide (both surfaces): the join screen's last answer, plus the profile they
+ *  show the room — their character's look, a status, their desk decoration, whether the song playing is shared. */
+export interface MultiplayerProfile {
+  room?: string;
+  displayName?: string;
+  /** The relay typed on the join screen (wins over multiplayer.json and the build's default). */
+  relayUrl?: string;
+  /** Null/absent = no look chosen: the office picks a character, as before. */
+  look?: AvatarLook | null;
+  status?: PersonStatus;
+  statusText?: string;
+  decor?: DeskDecorItem[];
+  shareMusic?: boolean;
+  /** The desk last claimed in each room (room → seat uid). */
+  desks?: Record<string, string>;
+  deskStyle?: string | null;
+  hidden?: string[];
+}
+
+/** Read multiplayer-profile.json, sanitized field by field (a hand edit can't smuggle anything past the relay's own
+ *  rules, and a malformed field reads as unset instead of failing the whole file). */
+export function readMultiplayerProfile(): MultiplayerProfile {
+  try {
+    const raw = JSON.parse(fs.readFileSync(multiplayerProfilePath(), 'utf-8')) as unknown;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    const r = raw as Record<string, unknown>;
+    const profile: MultiplayerProfile = {
+      room: nonEmpty(r.room),
+      displayName: nonEmpty(r.displayName),
+    };
+    const relayUrl = sanitizeRelayUrl(r.relayUrl);
+    if (relayUrl) profile.relayUrl = relayUrl;
+    const look = sanitizeLook(r.look);
+    if (look) profile.look = look;
+    if (r.status !== undefined) profile.status = sanitizeStatus(r.status);
+    if (typeof r.statusText === 'string') profile.statusText = sanitizeStatusText(r.statusText);
+    if (Array.isArray(r.decor)) profile.decor = sanitizeDecor(r.decor);
+    if (typeof r.shareMusic === 'boolean') profile.shareMusic = r.shareMusic;
+    if (r.desks && typeof r.desks === 'object') profile.desks = sanitizeDesks(r.desks);
+    if ('deskStyle' in r) profile.deskStyle = sanitizeDeskStyle(r.deskStyle);
+    if (Array.isArray(r.hidden)) profile.hidden = sanitizeHidden(r.hidden);
+    return profile;
+  } catch {
+    return {};
+  }
+}
+
+/** Merge `patch` into the saved profile. Its own file for the same reason as multiplayer.json: an older build
+ *  rewriting config.json would drop the keys. Written atomically; a failure only costs remembering it. */
+export function writeMultiplayerProfile(patch: MultiplayerProfile): void {
+  const filePath = multiplayerProfilePath();
+  try {
+    const next: Record<string, unknown> = { ...readMultiplayerProfile(), ...patch };
+    for (const key of Object.keys(next)) if (next[key] === undefined) delete next[key];
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const tmpPath = filePath + '.tmp';
+    fs.writeFileSync(tmpPath, JSON.stringify(next, null, 2), 'utf-8');
+    fs.renameSync(tmpPath, filePath);
+  } catch (err) {
+    console.warn('[Pixel Agents] Multiplayer: could not save the profile:', err);
+  }
+}
+
+/** The relay a build ships with: `PIXEL_AGENTS_DEFAULT_RELAY` at build time (esbuild inlines it) or, for an
+ *  unbundled run, in the environment. Lets a team hand out an extension whose join screen already knows the relay. */
+export function defaultRelayUrl(): string | undefined {
+  return sanitizeRelayUrl(process.env.PIXEL_AGENTS_DEFAULT_RELAY) ?? undefined;
+}
+
+/** The hand-written `~/.pixel-agents/multiplayer.json`, or undefined when absent or invalid. */
+function readMultiplayerFile(): MultiplayerSettings | undefined {
+  const filePath = path.join(os.homedir(), LAYOUT_FILE_DIR, MULTIPLAYER_FILE_NAME);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return undefined;
+  }
+  try {
+    const settings = parseMultiplayer(JSON.parse(raw));
+    if (!settings) {
+      console.warn(
+        `[Pixel Agents] Multiplayer: ignoring ${filePath} (needs "relayUrl" starting with ws:// or wss://)`,
+      );
+    }
+    return settings;
+  } catch (err) {
+    console.warn(`[Pixel Agents] Multiplayer: ${filePath} is not valid JSON: ${err}`);
+    return undefined;
+  }
+}
+
+/**
+ * Every office can join a room: this is what its join screen starts from. The relay is, newest first, the one
+ * typed on the join screen last time, `~/.pixel-agents/multiplayer.json`'s, or the build's default — or '' when
+ * none is known, and the join screen asks for it. Room and name only prefill. multiplayer.json is a file of its own
+ * rather than a config.json key: every build — including released ones that predate multiplayer — rewrites
+ * config.json from the fields it knows, so a key there is silently dropped by the next write of an older extension
+ * running in another window.
+ */
+export function getMultiplayerSettings(): MultiplayerSettings {
+  const file = readMultiplayerFile();
+  // The join screen's last answer is newer than the hand-written file.
+  const profile = readMultiplayerProfile();
+  return {
+    relayUrl: profile.relayUrl ?? file?.relayUrl ?? defaultRelayUrl() ?? '',
+    room: profile.room ?? file?.room,
+    displayName: profile.displayName ?? file?.displayName,
+    ...(file?.iceServers ? { iceServers: file.iceServers } : {}),
+  };
 }
 
 // ── Per-provider hooks consent + preference ─────────────────

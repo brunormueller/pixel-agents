@@ -16,23 +16,34 @@
 
 import { TILE_SIZE } from './types.js';
 
-/** Device-pixel offset of the map's top-left corner inside the canvas.
+/** The part of the grid on screen: the whole layout, or one level of a building
+ *  (`col`/`row` = its top-left tile in the grid; 0 when absent). */
+export interface ViewRect {
+  cols: number;
+  rows: number;
+  col?: number;
+  row?: number;
+}
+
+/** Device-pixel offset of the grid's top-left corner inside the canvas, with the
+ *  view (the layout, or the level on screen) centered.
  *  This is the renderer's own frame of reference — overlays go through
  *  {@link overlayProjection} instead of calling this directly. */
 export function mapOffset(
   canvasWidth: number,
   canvasHeight: number,
-  cols: number,
-  rows: number,
+  view: ViewRect,
   zoom: number,
   panX: number,
   panY: number,
 ): { offsetX: number; offsetY: number } {
-  const mapW = cols * TILE_SIZE * zoom;
-  const mapH = rows * TILE_SIZE * zoom;
+  const mapW = view.cols * TILE_SIZE * zoom;
+  const mapH = view.rows * TILE_SIZE * zoom;
   return {
-    offsetX: Math.floor((canvasWidth - mapW) / 2) + Math.round(panX),
-    offsetY: Math.floor((canvasHeight - mapH) / 2) + Math.round(panY),
+    offsetX:
+      Math.floor((canvasWidth - mapW) / 2) + Math.round(panX) - (view.col ?? 0) * TILE_SIZE * zoom,
+    offsetY:
+      Math.floor((canvasHeight - mapH) / 2) + Math.round(panY) - (view.row ?? 0) * TILE_SIZE * zoom,
   };
 }
 
@@ -50,7 +61,7 @@ export interface OverlayProjection {
 }
 
 export function overlayProjection(
-  layout: { cols: number; rows: number },
+  view: ViewRect,
   containerRect: { width: number; height: number },
   zoom: number,
   pan: { x: number; y: number },
@@ -58,15 +69,7 @@ export function overlayProjection(
 ): OverlayProjection {
   const canvasW = Math.round(containerRect.width * dpr);
   const canvasH = Math.round(containerRect.height * dpr);
-  const { offsetX, offsetY } = mapOffset(
-    canvasW,
-    canvasH,
-    layout.cols,
-    layout.rows,
-    zoom,
-    pan.x,
-    pan.y,
-  );
+  const { offsetX, offsetY } = mapOffset(canvasW, canvasH, view, zoom, pan.x, pan.y);
   return {
     toScreenX: (worldX) => (offsetX + worldX * zoom) / dpr,
     toScreenY: (worldY) => (offsetY + worldY * zoom) / dpr,

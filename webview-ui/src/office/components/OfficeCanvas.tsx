@@ -22,6 +22,7 @@ import type {
   SelectionRenderState,
 } from '../engine/renderer.js';
 import { renderFrame } from '../engine/renderer.js';
+import { doorTypeFor } from '../layout/doors.js';
 import { getCatalogEntry, isRotatable } from '../layout/furnitureCatalog.js';
 import { EditTool, TILE_SIZE } from '../types.js';
 import { computeNormalModeCursor } from './officeCanvasCursor.js';
@@ -84,9 +85,9 @@ export function OfficeCanvas({
     (px: number, py: number): { x: number; y: number } => {
       const canvas = canvasRef.current;
       if (!canvas) return { x: px, y: py };
-      const layout = officeState.getLayout();
-      const mapW = layout.cols * TILE_SIZE * zoom;
-      const mapH = layout.rows * TILE_SIZE * zoom;
+      const view = officeState.getView();
+      const mapW = view.cols * TILE_SIZE * zoom;
+      const mapH = view.rows * TILE_SIZE * zoom;
       const marginX = canvas.width * PAN_MARGIN_FRACTION;
       const marginY = canvas.height * PAN_MARGIN_FRACTION;
       const maxPanX = mapW / 2 + canvas.width / 2 - marginX;
@@ -162,26 +163,29 @@ export function OfficeCanvas({
 
           // Ghost preview for furniture placement
           if (editorState.activeTool === EditTool.FURNITURE_PLACE && editorState.ghostCol >= 0) {
-            const entry = getCatalogEntry(editorState.selectedFurnitureType);
+            // A door turns to fit the wall under the pointer.
+            const ghostType = doorTypeFor(
+              officeState.getLayout(),
+              editorState.selectedFurnitureType,
+              editorState.ghostCol,
+              editorState.ghostRow,
+            );
+            const entry = getCatalogEntry(ghostType);
             if (entry) {
-              const placementRow = getWallPlacementRow(
-                editorState.selectedFurnitureType,
-                editorState.ghostRow,
-              );
+              const placementRow = getWallPlacementRow(ghostType, editorState.ghostRow);
               const pickedColor = editorState.pickedFurnitureColor;
               editorRender.ghostSprite = pickedColor
                 ? getColorizedSprite(
-                    `ghost-${editorState.selectedFurnitureType}-${pickedColor.h}-${pickedColor.s}-${pickedColor.b}-${pickedColor.c}-${pickedColor.colorize ?? ''}`,
+                    `ghost-${ghostType}-${pickedColor.h}-${pickedColor.s}-${pickedColor.b}-${pickedColor.c}-${pickedColor.colorize ?? ''}`,
                     entry.sprite,
                     pickedColor,
                   )
                 : entry.sprite;
               editorRender.ghostRow = placementRow;
-              editorRender.ghostMirrored =
-                !!entry.mirrorSide && editorState.selectedFurnitureType.endsWith(':left');
+              editorRender.ghostMirrored = !!entry.mirrorSide && ghostType.endsWith(':left');
               editorRender.ghostValid = canPlaceFurniture(
                 officeState.getLayout(),
-                editorState.selectedFurnitureType,
+                ghostType,
                 editorState.ghostCol,
                 placementRow,
               );
@@ -243,11 +247,12 @@ export function OfficeCanvas({
             : undefined;
         const cameraFocus = followCh ?? officeState.greeterCameraTarget;
         if (cameraFocus) {
-          const layout = officeState.getLayout();
-          const mapW = layout.cols * TILE_SIZE * zoom;
-          const mapH = layout.rows * TILE_SIZE * zoom;
-          const targetX = mapW / 2 - cameraFocus.x * zoom;
-          const targetY = mapH / 2 - cameraFocus.y * zoom;
+          // Relative to the level on screen (the view is centered, not the grid).
+          const view = officeState.getView();
+          const mapW = view.cols * TILE_SIZE * zoom;
+          const mapH = view.rows * TILE_SIZE * zoom;
+          const targetX = mapW / 2 - (cameraFocus.x - view.col * TILE_SIZE) * zoom;
+          const targetY = mapH / 2 - (cameraFocus.y - view.row * TILE_SIZE) * zoom;
           const dx = targetX - panRef.current.x;
           const dy = targetY - panRef.current.y;
           if (
@@ -270,6 +275,15 @@ export function OfficeCanvas({
           hoveredTile: officeState.hoveredTile,
           seats: officeState.seats,
           characters: officeState.characters,
+          gameSlots: officeState.hoveredTile
+            ? (() => {
+                const uid = officeState.getGameTableAtTile(
+                  officeState.hoveredTile.col,
+                  officeState.hoveredTile.row,
+                );
+                return uid ? officeState.getGameSlotStatus(uid) : [];
+              })()
+            : [],
         };
 
         const layout = officeState.getLayout();
@@ -294,6 +308,10 @@ export function OfficeCanvas({
           showAreas,
           activeAreaLabel,
           officeState.pets,
+          officeState.getScoreboards(),
+          officeState.getBalls(),
+          officeState.getView(),
+          officeState.getTransitLabels(),
         );
         offsetRef.current = { x: offsetX, y: offsetY };
 
@@ -346,7 +364,8 @@ export function OfficeCanvas({
       if (!pos) return null;
       const col = Math.floor(pos.worldX / TILE_SIZE);
       const row = Math.floor(pos.worldY / TILE_SIZE);
-      const layout = officeState.getLayout();
+      // The level on screen (the whole grid for a one-level office).
+      const v = officeState.getView();
       // In edit mode with floor/wall/erase tool, extend valid range by 1 for ghost border
       if (
         isEditMode &&
@@ -354,10 +373,12 @@ export function OfficeCanvas({
           editorState.activeTool === EditTool.WALL_PAINT ||
           editorState.activeTool === EditTool.ERASE)
       ) {
-        if (col < -1 || col > layout.cols || row < -1 || row > layout.rows) return null;
+        if (col < v.col - 1 || col > v.col + v.cols || row < v.row - 1 || row > v.row + v.rows) {
+          return null;
+        }
         return { col, row };
       }
-      if (col < 0 || col >= layout.cols || row < 0 || row >= layout.rows) return null;
+      if (col < v.col || col >= v.col + v.cols || row < v.row || row >= v.row + v.rows) return null;
       return { col, row };
     },
     [screenToWorld, officeState, isEditMode, editorState],
@@ -430,12 +451,12 @@ export function OfficeCanvas({
               editorState.activeTool === EditTool.CARPET_PAINT ||
               editorState.activeTool === EditTool.AREA_PAINT)
           ) {
-            const layout = officeState.getLayout();
+            const v = officeState.getView();
             if (
-              tile.col >= 0 &&
-              tile.col < layout.cols &&
-              tile.row >= 0 &&
-              tile.row < layout.rows
+              tile.col >= v.col &&
+              tile.col < v.col + v.cols &&
+              tile.row >= v.row &&
+              tile.row < v.row + v.rows
             ) {
               onEditorEraseAction(tile.col, tile.row);
             }
@@ -516,6 +537,7 @@ export function OfficeCanvas({
           getSeatAtTile: (col, row) => officeState.getSeatAtTile(col, row),
           getSeat: (seatId) => officeState.seats.get(seatId),
           getCharacter: (id) => officeState.characters.get(id),
+          getGameTableAtTile: (col, row) => officeState.getGameTableAtTile(col, row),
         });
       }
       officeState.hoveredAgentId = hitId;
@@ -567,8 +589,13 @@ export function OfficeCanvas({
             editorState.activeTool === EditTool.CARPET_PAINT ||
             editorState.activeTool === EditTool.AREA_PAINT)
         ) {
-          const layout = officeState.getLayout();
-          if (tile.col >= 0 && tile.col < layout.cols && tile.row >= 0 && tile.row < layout.rows) {
+          const v = officeState.getView();
+          if (
+            tile.col >= v.col &&
+            tile.col < v.col + v.cols &&
+            tile.row >= v.row &&
+            tile.row < v.row + v.rows
+          ) {
             isEraseDraggingRef.current = true;
             onEditorEraseAction(tile.col, tile.row);
           }
@@ -758,6 +785,13 @@ export function OfficeCanvas({
         if (selectedCh && !selectedCh.isSubagent) {
           const tile = screenToTile(e.clientX, e.clientY);
           if (tile) {
+            // Clicked a game table (or one of its ends) — send the agent to play
+            const tableUid = officeState.getGameTableAtTile(tile.col, tile.row);
+            if (tableUid && officeState.sendToGame(officeState.selectedAgentId, tableUid)) {
+              officeState.selectedAgentId = null;
+              officeState.cameraFollowId = null;
+              return;
+            }
             const seatId = officeState.getSeatAtTile(tile.col, tile.row);
             if (seatId) {
               const seat = officeState.seats.get(seatId);
@@ -884,6 +918,7 @@ export function OfficeCanvas({
         onMouseLeave={handleMouseLeave}
         onContextMenu={handleContextMenu}
         className="block"
+        data-office-canvas
       />
     </div>
   );

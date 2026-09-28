@@ -127,7 +127,7 @@ _Avoid_: fuel gauge, health bar, token gauge (tokens are the unit, context is th
 
 **Office**:
 The whole simulated world: the layout plus its inhabitants — characters and pets — and their live state.
-_Avoid_: map, scene, room, level
+_Avoid_: map, scene, room
 
 **Layout**:
 The office's spatial arrangement: the tile grid, floors, walls, carpets, areas, and furniture. It is the part of the office that the editor edits and that can be exported and shared.
@@ -141,6 +141,20 @@ The walkable surface of a tile, painted with a pattern and color.
 
 **Wall**:
 A blocking tile that visually connects to adjacent walls.
+
+**Level**:
+One storey of a multi-storey office: a rectangle of the layout grid. Levels stand side by side in the grid, a VOID column apart, and only the one being looked at is drawn. Its elevation orders it: higher is upstairs. The UI calls them "floors" (the switcher's heading); in code and docs they are levels, because "floor" is already the tile surface.
+_Avoid_: storey, story, floor (for the whole level)
+
+**Portal**:
+Stairs or an elevator: the furniture that connects levels. Portals sharing a link are connected — stairs in pairs, an elevator with one door per level it stops at. A character uses one from the tile(s) in front of it and comes out in front of the other end. Whether it goes up or down is never stored: it is the two levels' elevation difference, so reordering levels flips it.
+_Avoid_: door, teleporter
+
+**Door**:
+Furniture that sits in a wall: the wall tile it is placed on becomes its doorway, which anyone may walk through, and it opens by itself while someone does. Not a portal — it stays on one level.
+
+**Ride**:
+A character going through a portal: leaving one level (climbing, sinking into the stairwell, stepping into the elevator) and arriving on the other. The person's view goes with them.
 
 **Carpet**:
 A decorative layer painted over floor tiles.
@@ -214,3 +228,29 @@ _Avoid_: connection, socket
 **Protocol**:
 The message contract between the office UI and the runtime, shared by every adapter and defined in a single source of truth.
 _Avoid_: API
+
+## Multiplayer
+
+**Room**:
+The set of offices that see each other's agents. Joining one is opt-in and machine-wide; its name is the only access control, so it is treated like a password.
+_Avoid_: channel, lobby, server
+
+**Peer**:
+One office in a room — a VS Code window or a Standalone server. Each peer publishes a summary of its own agents and draws everyone else's.
+_Avoid_: client, player, user (a person may run several peers)
+
+**Relay**:
+The small fan-out service peers connect to. It forwards each peer's summary to the rest of its room and keeps nothing once a peer leaves — except each room's map, which it keeps (on disk by default) so the room still has it after everyone left. It is not the Runtime and never sees a transcript.
+_Avoid_: multiplayer server, hub
+
+**Room map**:
+The one layout every peer in a room shows instead of its own. A room that has none starts with its creator's layout; after that anyone in the room edits it, and the relay numbers its revisions so an edit made on an older one is refused and merged in again. It never overwrites a peer's own layout.
+_Avoid_: shared layout, owner's layout (nobody owns it once it exists)
+
+**Remote agent**:
+Another peer's agent, drawn as a character in this office. Only its coarse status travels — active or idle, typing or reading, needs approval — never tool names, arguments, prompts or folder names. It takes a free seat in the local layout (layouts are per office, so positions never travel), cannot be focused and is never persisted.
+_Avoid_: guest agent, foreign agent, online agent
+
+**Meeting**:
+A video call inside a room. Each peer publishes its person's presence in it (mic, camera, shared screens, raised hand, recording); a meeting is simply every peer publishing the same id, so there is no host and nothing to end. Audio, video and screens go browser to browser; the relay only passes the call's setup, chat and captions along, and only to that meeting's participants.
+_Avoid_: call room, conference, huddle (a Meeting lives inside a Room, it is not one)

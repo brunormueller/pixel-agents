@@ -101,6 +101,23 @@ export class EditorState {
     this.redoStack = [];
   }
 
+  /** Someone else changed the shared map: carry that change onto every snapshot
+   *  here, so undoing our own edit does not also undo theirs. */
+  rebaseHistory(rebase: (layout: OfficeLayout) => OfficeLayout): void {
+    this.undoStack = this.undoStack.map(rebase);
+    this.redoStack = this.redoStack.map(rebase);
+    if (this.carpetStrokeInitialLayout) {
+      this.carpetStrokeInitialLayout = rebase(this.carpetStrokeInitialLayout);
+    }
+  }
+
+  /** A different map is on screen: its history starts over. */
+  clearHistory(): void {
+    this.undoStack = [];
+    this.redoStack = [];
+    this.carpetStrokeInitialLayout = null;
+  }
+
   clearSelection(): void {
     this.selectedFurnitureUid = null;
   }

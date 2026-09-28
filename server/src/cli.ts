@@ -8,6 +8,8 @@
  * Each connecting WebSocket client receives the full state on webviewReady.
  */
 
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 import { AgentRuntime } from './agentRuntime.js';
@@ -22,11 +24,28 @@ import type { AssetCache, ReloadAssetsSideEffect } from './clientMessageHandler.
 import {
   getHooksConsent,
   getHooksEnabled,
+  getMultiplayerSettings,
   grantHooksConsent,
   readConfig,
+  readMultiplayerIceServers,
+  readMultiplayerProfile,
+  writeMultiplayerProfile,
 } from './configPersistence.js';
-import { MAX_PORT, MIN_PORT } from './constants.js';
+import {
+  LAYOUT_FILE_DIR,
+  MAX_PORT,
+  MIN_PORT,
+  MULTIPLAYER_RELAY_DEFAULT_PORT,
+  MULTIPLAYER_RELAY_ROOMS_DIR_NAME,
+} from './constants.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
+import { Integrations } from './integrations/index.js';
+import { readLayoutFromFile } from './layoutPersistence.js';
+import type { MultiplayerSettings } from './multiplayer/multiplayerClient.js';
+import { MultiplayerClient } from './multiplayer/multiplayerClient.js';
+import type { IceServer } from './multiplayer/protocol.js';
+import { sanitizeIceServers } from './multiplayer/protocol.js';
+import { startRelayServer } from './multiplayer/relayServer.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
 import { PixelAgentsServer } from './server.js';
 
@@ -37,6 +56,24 @@ export interface CliArgs {
    *  can run at once without a collision. --port picks a fixed one. */
   port?: number;
   host: string;
+  /** Multiplayer: this relay (overrides ~/.pixel-agents/multiplayer.json). With --room the office joins at start;
+   *  without it the page shows the join screen. */
+  relay?: string;
+  room?: string;
+  name?: string;
+}
+
+/** `pixel-agents relay [--port N] [--host H] [--ice-servers F] [--rooms-dir D | --no-save-rooms]` — run a
+ *  multiplayer relay instead of an office. */
+export interface RelayCliArgs {
+  port: number;
+  host: string;
+  /** JSON file with STUN/TURN servers every office gets for meeting media. */
+  iceServers?: string;
+  /** Where room maps are kept (default ~/.pixel-agents/relay-rooms). */
+  roomsDir?: string;
+  /** --no-save-rooms: room maps live in memory only, gone once a room empties. */
+  saveRooms?: false;
 }
 
 /** Thrown by parseArgs on an invalid --port. Kept separate from process.exit so
@@ -44,38 +81,111 @@ export interface CliArgs {
  *  place that turns a bad argument into an exit code. */
 export class CliArgsError extends Error {}
 
+function parsePort(flag: string, raw: string | undefined): number {
+  if (raw === undefined) {
+    throw new CliArgsError(
+      `Missing value for ${flag}: expected an integer between ${MIN_PORT} and ${MAX_PORT}.`,
+    );
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < MIN_PORT || parsed > MAX_PORT) {
+    throw new CliArgsError(
+      `Invalid --port "${raw}": must be an integer between ${MIN_PORT} and ${MAX_PORT}.`,
+    );
+  }
+  return parsed;
+}
+
+function requireValue(flag: string, raw: string | undefined): string {
+  if (raw === undefined || raw.startsWith('--')) {
+    throw new CliArgsError(`Missing value for ${flag}.`);
+  }
+  return raw;
+}
+
 export function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = { host: '127.0.0.1' };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port' || argv[i] === '-p') {
-      const raw = argv[i + 1];
-      if (raw === undefined) {
-        throw new CliArgsError(
-          `Missing value for ${argv[i]}: expected an integer between ${MIN_PORT} and ${MAX_PORT}.`,
-        );
-      }
-      const parsed = Number(raw);
-      if (!Number.isInteger(parsed) || parsed < MIN_PORT || parsed > MAX_PORT) {
-        throw new CliArgsError(
-          `Invalid --port "${raw}": must be an integer between ${MIN_PORT} and ${MAX_PORT}.`,
-        );
-      }
-      args.port = parsed;
+      args.port = parsePort(argv[i], argv[i + 1]);
       i++;
     } else if (argv[i] === '--host' && argv[i + 1]) {
       args.host = argv[i + 1];
       i++;
+    } else if (argv[i] === '--relay') {
+      const url = requireValue(argv[i], argv[i + 1]);
+      if (!/^wss?:\/\//i.test(url)) {
+        throw new CliArgsError(`Invalid --relay "${url}": must be a ws:// or wss:// URL.`);
+      }
+      args.relay = url;
+      i++;
+    } else if (argv[i] === '--room') {
+      args.room = requireValue(argv[i], argv[i + 1]);
+      i++;
+    } else if (argv[i] === '--name') {
+      args.name = requireValue(argv[i], argv[i + 1]);
+      i++;
     } else if (argv[i] === '--help') {
       console.log(`Usage: pixel-agents [options]
+       pixel-agents relay [--port <number>] [--host <string>] [--ice-servers <file.json>]
+                          [--rooms-dir <dir> | --no-save-rooms]
 
 Options:
   --port, -p <number>   Port to listen on (default: OS-assigned ephemeral port)
   --host <string>       Host to bind to (default: 127.0.0.1)
-  --help                Show this help message`);
+  --relay <url>         Multiplayer: ws:// or wss:// URL of a pixel-agents relay (the page asks name + room)
+  --room <string>       Multiplayer: join this room right away, skipping the join screen (treat it like a password)
+  --name <string>       Multiplayer: name shown to the other people in the room
+  --help                Show this help message
+
+Commands:
+  relay                 Run a multiplayer relay (default port ${MULTIPLAYER_RELAY_DEFAULT_PORT})`);
       process.exit(0);
     }
   }
   return args;
+}
+
+export function parseRelayArgs(argv: string[]): RelayCliArgs {
+  const args: RelayCliArgs = { port: MULTIPLAYER_RELAY_DEFAULT_PORT, host: '127.0.0.1' };
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--port' || argv[i] === '-p') {
+      args.port = parsePort(argv[i], argv[i + 1]);
+      i++;
+    } else if (argv[i] === '--host') {
+      args.host = requireValue(argv[i], argv[i + 1]);
+      i++;
+    } else if (argv[i] === '--ice-servers') {
+      args.iceServers = requireValue(argv[i], argv[i + 1]);
+      i++;
+    } else if (argv[i] === '--rooms-dir') {
+      args.roomsDir = requireValue(argv[i], argv[i + 1]);
+      i++;
+    } else if (argv[i] === '--no-save-rooms') {
+      args.saveRooms = false;
+    }
+  }
+  if (args.roomsDir && args.saveRooms === false) {
+    throw new CliArgsError('--rooms-dir and --no-save-rooms contradict each other: pick one.');
+  }
+  return args;
+}
+
+/** Resolve the multiplayer settings: CLI flags win over multiplayer.json, and both over the join screen's last
+ *  answer (which only prefills). Always settings: without a relay the page's join screen asks for one. */
+export function resolveMultiplayerSettings(args: CliArgs): MultiplayerSettings {
+  if (args.relay) {
+    const profile = readMultiplayerProfile();
+    const iceServers = readMultiplayerIceServers();
+    return {
+      relayUrl: args.relay,
+      room: args.room ?? profile.room,
+      displayName:
+        args.name ?? profile.displayName ?? (args.room ? os.userInfo().username : undefined),
+      ...(iceServers && iceServers.length > 0 ? { iceServers } : {}),
+    };
+  }
+  return getMultiplayerSettings();
 }
 
 // ── Hooks consent ─────────────────────────────────────────────
@@ -103,7 +213,64 @@ function copyHookScriptOrReport(packageRoot: string, context = ''): boolean {
 
 // ── Main ──────────────────────────────────────────────────────
 
+async function runRelay(argv: string[]): Promise<void> {
+  let args: RelayCliArgs;
+  try {
+    args = parseRelayArgs(argv);
+  } catch (err) {
+    console.error(`[Pixel Agents] ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+  let iceServers: IceServer[] = [];
+  if (args.iceServers) {
+    try {
+      iceServers = sanitizeIceServers(JSON.parse(fs.readFileSync(args.iceServers, 'utf-8')));
+    } catch (err) {
+      console.error(`[Pixel Agents] --ice-servers: cannot read ${args.iceServers}: ${err}`);
+      process.exit(1);
+    }
+    if (iceServers.length === 0) {
+      console.error(
+        `[Pixel Agents] --ice-servers: ${args.iceServers} has no usable entry (expected [{ "urls": ["turn:host:3478"], "username": "...", "credential": "..." }]).`,
+      );
+      process.exit(1);
+    }
+  }
+  const roomsDir =
+    args.saveRooms === false
+      ? undefined
+      : path.resolve(
+          args.roomsDir ??
+            path.join(os.homedir(), LAYOUT_FILE_DIR, MULTIPLAYER_RELAY_ROOMS_DIR_NAME),
+        );
+  const relay = await startRelayServer({
+    host: args.host,
+    port: args.port,
+    verbose: true,
+    iceServers,
+    roomsDir,
+  });
+  console.log(`\n  Pixel Agents relay listening on ws://${args.host}:${relay.port}/\n`);
+  console.log(
+    roomsDir
+      ? `  Room maps are kept in ${roomsDir} (anyone in a room may edit its map).\n`
+      : '  Room maps are kept in memory only: a room forgets its map once everyone left.\n',
+  );
+  if (iceServers.length > 0) {
+    console.log(`  Meetings: ${iceServers.length} ICE server(s) handed to every office.\n`);
+  }
+  const shutdown = () => {
+    void relay.close().finally(() => process.exit(0));
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+}
+
 async function main(): Promise<void> {
+  if (process.argv[2] === 'relay') {
+    await runRelay(process.argv.slice(3));
+    return;
+  }
   let args: CliArgs;
   try {
     args = parseArgs(process.argv.slice(2));
@@ -144,6 +311,21 @@ async function main(): Promise<void> {
   try {
     // Create runtime first (before server.start, so we can pass it in)
     const runtime = new AgentRuntime(store, claudeProvider);
+
+    // Multiplayer: publish this office's agents to a relay, draw the room's.
+    const multiplayerSettings = resolveMultiplayerSettings(args);
+    const multiplayer = new MultiplayerClient(
+      store,
+      multiplayerSettings,
+      claudeProvider.readingTools,
+      {
+        getLocalLayout: () => readLayoutFromFile() ?? assetCache.defaultLayout ?? null,
+        rememberProfile: writeMultiplayerProfile,
+        initialProfile: readMultiplayerProfile(),
+      },
+    );
+    // The person's calendar and Spotify. The page opens the Spotify sign-in itself (openExternalUrl).
+    const integrations = new Integrations(store, { multiplayer });
 
     // Wire hook events: HTTP POST -> runtime -> hookEventHandler -> agents
     server.onHookEvent((providerId, event) => {
@@ -237,7 +419,32 @@ async function main(): Promise<void> {
       assetCache,
       onSetHooksEnabled,
       onReloadAssets,
+      multiplayer,
+      integrations,
+      // --relay names a distinct office, so it gets its own server (and page). Reusing a running one would open
+      // THAT office, while this process published agents nobody could see.
+      reuseExisting: !args.relay,
     });
+    if (server.isOwner()) {
+      if (args.room && multiplayerSettings.relayUrl) {
+        console.log(`[Pixel Agents] Multiplayer: joining ${multiplayerSettings.relayUrl}`);
+        multiplayer.start();
+      } else if (multiplayerSettings.relayUrl) {
+        console.log(
+          `[Pixel Agents] Multiplayer: relay ${multiplayerSettings.relayUrl} — open the page below to enter your name and room.`,
+        );
+      }
+    } else {
+      // The running server owns the office on screen; it joins the room itself when asked to.
+      if (args.room) {
+        console.log(
+          '[Pixel Agents] Multiplayer: reusing a running server, so it is that server that joins the room (or not). Pass --relay to start a separate office.',
+        );
+      }
+      multiplayer.dispose();
+    }
+    // Only the server that owns the page polls the person's apps.
+    if (server.isOwner()) integrations.start();
     currentConfig = { port: config.port, token: config.token };
 
     // Sync runtime refs with persisted settings BEFORE first scan tick. The
@@ -309,6 +516,8 @@ async function main(): Promise<void> {
     // ── Graceful shutdown ──
     function shutdown(): void {
       console.log('\nShutting down...');
+      multiplayer?.dispose();
+      integrations.dispose();
       runtime.dispose();
       server.stop();
       process.exit(0);

@@ -1,0 +1,87 @@
+{
+  "id": "DOOR",
+  "name": "Door",
+  "category": "wall",
+  "type": "group",
+  "groupType": "rotation",
+  "rotationScheme": "2-way",
+  "canPlaceOnWalls": false,
+  "canPlaceOnSurfaces": false,
+  "backgroundTiles": 1,
+  "members": [
+    {
+      "type": "group",
+      "groupType": "state",
+      "orientation": "front",
+      "members": [
+        {
+          "type": "asset",
+          "id": "DOOR_FRONT",
+          "file": "DOOR_FRONT.png",
+          "width": 16,
+          "height": 32,
+          "footprintW": 1,
+          "footprintH": 2,
+          "state": "off"
+        },
+        {
+          "type": "asset",
+          "id": "DOOR_FRONT_HALF",
+          "file": "DOOR_FRONT_HALF.png",
+          "width": 16,
+          "height": 32,
+          "footprintW": 1,
+          "footprintH": 2,
+          "state": "on"
+        },
+        {
+          "type": "asset",
+          "id": "DOOR_FRONT_OPEN",
+          "file": "DOOR_FRONT_OPEN.png",
+          "width": 16,
+          "height": 32,
+          "footprintW": 1,
+          "footprintH": 2,
+          "state": "on"
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "groupType": "state",
+      "orientation": "side",
+      "members": [
+        {
+          "type": "asset",
+          "id": "DOOR_SIDE",
+          "file": "DOOR_SIDE.png",
+          "width": 16,
+          "height": 32,
+          "footprintW": 1,
+          "footprintH": 2,
+          "state": "off"
+        },
+        {
+          "type": "asset",
+          "id": "DOOR_SIDE_HALF",
+          "file": "DOOR_SIDE_HALF.png",
+          "width": 16,
+          "height": 32,
+          "footprintW": 1,
+          "footprintH": 2,
+          "state": "on"
+        },
+        {
+          "type": "asset",
+          "id": "DOOR_SIDE_OPEN",
+          "file": "DOOR_SIDE_OPEN.png",
+          "width": 16,
+          "height": 32,
+          "footprintW": 1,
+          "footprintH": 2,
+          "state": "on"
+        }
+      ]
+    }
+  ]
+}

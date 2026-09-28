@@ -1,7 +1,9 @@
 import type { ColorValue } from '../../components/ui/types.js';
-import { DEFAULT_NEUTRAL_COLOR } from '../../constants.js';
+import { DEFAULT_NEUTRAL_COLOR, ELEVATOR_GROUP_ID, STAIRS_GROUP_ID } from '../../constants.js';
+import { canPlaceDoor, doorTile, isDoorType, isSideDoor } from '../layout/doors.js';
 import { getCatalogEntry, getRotatedType, getToggledType } from '../layout/furnitureCatalog.js';
 import { getPlacementBlockedTiles } from '../layout/layoutSerializer.js';
+import { levelOfColumn } from '../layout/levels.js';
 import type {
   AreaDefinition,
   CarpetTile,
@@ -114,8 +116,42 @@ export function toggleFurnitureState(layout: OfficeLayout, uid: string): OfficeL
 /** For wall items, offset the row so the bottom row aligns with the hovered tile. */
 export function getWallPlacementRow(type: string, row: number): number {
   const entry = getCatalogEntry(type);
-  if (!entry?.canPlaceOnWalls) return row;
+  // Doors too: the hovered tile is the doorway, the lintel hangs above it.
+  if (!entry?.canPlaceOnWalls && !(entry && isDoorType(type))) return row;
   return row - (entry.footprintH - 1);
+}
+
+/**
+ * A door was placed (or moved) with its top-left at (col, row): a wall tile
+ * under its doorway becomes floor, like the floor beside it on the way through,
+ * so people can walk there. Returns the layout unchanged when it already is floor.
+ */
+export function openDoorway(
+  layout: OfficeLayout,
+  type: string,
+  col: number,
+  row: number,
+): OfficeLayout {
+  const { col: c, row: r } = doorTile({ type, col, row });
+  if (layout.tiles[r * layout.cols + c] !== TileType.WALL) return layout;
+  const through = isSideDoor(type)
+    ? [
+        [c - 1, r],
+        [c + 1, r],
+      ]
+    : [
+        [c, r + 1],
+        [c, r - 1],
+      ];
+  for (const [nc, nr] of through) {
+    if (nc < 0 || nr < 0 || nc >= layout.cols || nr >= layout.rows) continue;
+    const idx = nr * layout.cols + nc;
+    const t = layout.tiles[idx];
+    if (t === TileType.WALL || t === TileType.VOID) continue;
+    const color = layout.tileColors?.[idx];
+    return paintTile(layout, c, r, t, color ? { ...color } : undefined);
+  }
+  return paintTile(layout, c, r, TileType.FLOOR_1 as TileTypeVal);
 }
 
 /** Check if furniture can be placed at (col, row) without overlapping. */
@@ -129,8 +165,9 @@ export function canPlaceFurniture(
   const entry = getCatalogEntry(type);
   if (!entry) return false;
 
-  // Check bounds — wall items may extend above the map (top rows hang above the wall)
-  if (entry.canPlaceOnWalls) {
+  const door = isDoorType(type);
+  // Check bounds — wall items (and door lintels) may extend above the map
+  if (entry.canPlaceOnWalls || door) {
     const bottomRow = row + entry.footprintH - 1;
     if (
       col < 0 ||
@@ -149,6 +186,24 @@ export function canPlaceFurniture(
     ) {
       return false;
     }
+  }
+
+  // A building with levels: the item stands on one level, never across the gap to the next.
+  if (layout.levels && layout.levels.length > 1) {
+    const level = levelOfColumn(layout.levels, col);
+    const bottomRow = row + entry.footprintH - 1;
+    if (!level || col + entry.footprintW > level.col + level.cols) return false;
+    if (bottomRow < level.row || bottomRow >= level.row + level.rows) return false;
+    if (!entry.canPlaceOnWalls && !door && row < level.row) return false;
+  }
+
+  // Doors have their own rule: in a wall, between two wall tiles.
+  if (door) {
+    const occupied = getPlacementBlockedTiles(layout.furniture, excludeUid);
+    return (
+      canPlaceDoor(layout, type, col, row, occupied) &&
+      portalRoomOk(layout, type, col, row, excludeUid)
+    );
   }
 
   // Wall/VOID placement check (background rows skip this check)
@@ -200,7 +255,75 @@ export function canPlaceFurniture(
     }
   }
 
-  return true;
+  return portalRoomOk(layout, type, col, row, excludeUid);
+}
+
+/** Stairs and elevators (portals) are used from the floor tile(s) right in front of them. */
+function isPortalType(type: string): boolean {
+  const group = getCatalogEntry(type)?.groupId;
+  return group === STAIRS_GROUP_ID || group === ELEVATOR_GROUP_ID;
+}
+
+/** Every tile of a footprint on the map (background rows included). */
+function footprintTiles(type: string, col: number, row: number): string[] {
+  const entry = getCatalogEntry(type);
+  if (!entry) return [];
+  const out: string[] = [];
+  for (let dr = 0; dr < entry.footprintH; dr++) {
+    if (row + dr < 0) continue;
+    for (let dc = 0; dc < entry.footprintW; dc++) out.push(`${col + dc},${row + dr}`);
+  }
+  return out;
+}
+
+/** The tiles in front of a portal (below its footprint), where characters step in. */
+function accessTiles(type: string, col: number, row: number): string[] {
+  const entry = getCatalogEntry(type);
+  if (!entry) return [];
+  const out: string[] = [];
+  for (let dc = 0; dc < entry.footprintW; dc++) out.push(`${col + dc},${row + entry.footprintH}`);
+  return out;
+}
+
+/**
+ * A portal needs its footprint to itself (nothing on it, not even background
+ * rows) and walkable floor in front of it; and nothing else may stand on a
+ * portal or block the way into one — a staircase behind a desk leads nowhere.
+ */
+function portalRoomOk(
+  layout: OfficeLayout,
+  type: string,
+  col: number,
+  row: number,
+  excludeUid?: string,
+): boolean {
+  const others = layout.furniture.filter((f) => f.uid !== excludeUid);
+  const portals = others.filter((f) => isPortalType(f.type));
+  const mine = footprintTiles(type, col, row);
+  if (isPortalType(type)) {
+    const taken = new Set(others.flatMap((f) => footprintTiles(f.type, f.col, f.row)));
+    if (mine.some((k) => taken.has(k))) return false;
+    const blocking = getPlacementBlockedTiles(others);
+    for (const key of accessTiles(type, col, row)) {
+      const [c, r] = key.split(',').map(Number);
+      if (c < 0 || r < 0 || c >= layout.cols || r >= layout.rows) return false;
+      const tile = layout.tiles[r * layout.cols + c];
+      if (tile === TileType.WALL || tile === TileType.VOID) return false;
+      if (blocking.has(key) || taken.has(key)) return false;
+    }
+    return true;
+  }
+  if (portals.length === 0) return true;
+  const portalTiles = new Set(portals.flatMap((f) => footprintTiles(f.type, f.col, f.row)));
+  if (mine.some((k) => portalTiles.has(k))) return false;
+  // What this item blocks (its background rows let characters pass).
+  const entry = getCatalogEntry(type);
+  const bg = entry?.backgroundTiles || 0;
+  const doors = new Set(portals.flatMap((f) => accessTiles(f.type, f.col, f.row)));
+  return !mine.some((k) => {
+    const r = Number(k.split(',')[1]);
+    return r - row >= bg && doors.has(k);
+  });
 }
 
 /**

@@ -1,0 +1,32 @@
+{
+  "id": "STAIRS",
+  "name": "Stairs",
+  "category": "misc",
+  "type": "group",
+  "groupType": "state",
+  "canPlaceOnWalls": false,
+  "canPlaceOnSurfaces": false,
+  "backgroundTiles": 0,
+  "members": [
+    {
+      "type": "asset",
+      "id": "STAIRS_UP",
+      "file": "STAIRS_UP.png",
+      "width": 32,
+      "height": 32,
+      "footprintW": 2,
+      "footprintH": 2,
+      "state": "off"
+    },
+    {
+      "type": "asset",
+      "id": "STAIRS_DOWN",
+      "file": "STAIRS_DOWN.png",
+      "width": 32,
+      "height": 32,
+      "footprintW": 2,
+      "footprintH": 2,
+      "state": "on"
+    }
+  ]
+}

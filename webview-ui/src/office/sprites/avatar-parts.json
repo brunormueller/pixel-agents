@@ -1,0 +1,373 @@
+{
+  "_comment": "Avatar customization data. roles[body] lists the colors of each character sheet (assets/characters/char_<body>.png) that belong to its hair, top and bottom clothes, so they can be recolored. accessories are drawn over the head of the walking frame of each direction (left = mirrored right), at rows placed for a standard head whose eyes are on row eyeRow[direction]; the other frames follow their head's offset. Keys map to palette colors, '.' is transparent. coversHair: hair above the accessory's first row is cleared (hats).",
+  "eyeRow": { "down": 13, "up": 13, "right": 15 },
+  "roles": [
+    {
+      "hair": ["#32191D", "#B18649", "#8F6439", "#6D4726", "#341F20", "#6F4A2A"],
+      "top": ["#071C2E", "#1164A9", "#114978", "#0F406A"],
+      "bottom": []
+    },
+    {
+      "hair": ["#7E4B29", "#E39F5A", "#F1C084", "#BE7743"],
+      "top": ["#2B2B2B", "#252525", "#1A1A1A", "#101010"],
+      "bottom": []
+    },
+    {
+      "hair": ["#181616", "#221E1E", "#282423", "#2B2827", "#252120", "#1B1A19"],
+      "top": [
+        "#56110E",
+        "#E8741B",
+        "#A91D18",
+        "#F67D20",
+        "#741713",
+        "#8B1A16",
+        "#E87218",
+        "#E1721D",
+        "#FF8B31",
+        "#592700"
+      ],
+      "bottom": ["#111528", "#343D5A", "#23294D", "#49557E"]
+    },
+    {
+      "hair": ["#B0A6A3", "#DACCC9", "#F0E1DE", "#FFF1EF", "#E9D7D4", "#BFB6B3"],
+      "top": ["#4C4C4C", "#EEEEEE", "#D4D4D4", "#BDBDBD"],
+      "bottom": ["#3C314F", "#D2B48E", "#796064", "#AC9082"]
+    },
+    {
+      "hair": ["#2F160F", "#69451B", "#57351A", "#432415", "#421B19", "#442414"],
+      "top": ["#4C4C4C", "#EEEEEE", "#D4D4D4", "#BDBDBD"],
+      "bottom": ["#071C2E", "#0F406A", "#114978"]
+    },
+    {
+      "hair": ["#0E0E0E", "#202020", "#414141", "#131313", "#303030", "#373737", "#282828"],
+      "top": ["#640026", "#E16451", "#B24737", "#9F3F31"],
+      "bottom": ["#0F0C13", "#332C23", "#1D1718", "#2A2320"]
+    }
+  ],
+  "palette": {
+    "K": "#1C1C24",
+    "k": "#3A3A46",
+    "W": "#F2F2F2",
+    "R": "#D63A3A",
+    "r": "#932424",
+    "B": "#3A6AD8",
+    "b": "#27469A",
+    "L": "#86A8F0",
+    "Y": "#F2C230",
+    "y": "#B0861A",
+    "M": "#E05AC0",
+    "C": "#3AD0E0",
+    "P": "#F072A8",
+    "G": "#4AA050",
+    "A": "#3AE07A",
+    "g": "#6E6E7C",
+    "D": "#2A2A34",
+    "H": "#FFF27A",
+    "S": "#16161E",
+    "s": "#5C5C78"
+  },
+  "accessories": {
+    "cap": {
+      "coversHair": true,
+      "down": {
+        "y": 1,
+        "rows": [
+          ".....KKKKKK.....",
+          "....KRRRRRRK....",
+          "...KRRRWWRRRK...",
+          "...KRRRRRRRRK...",
+          "..KrrrrrrrrrrK..",
+          ".KrrrrrrrrrrrrK.",
+          "..KKKKKKKKKKKK.."
+        ]
+      },
+      "up": {
+        "y": 1,
+        "rows": [
+          ".....KKKKKK.....",
+          "....KRRRRRRK....",
+          "...KRRRRRRRRK...",
+          "...KRRRRRRRRK...",
+          "..KRRRRRRRRRRK..",
+          "..KrrrrrrrrrrK.."
+        ]
+      },
+      "right": {
+        "y": 3,
+        "rows": [
+          "......KKKKK.....",
+          ".....KRRRRRK....",
+          "....KRRRRRRRK...",
+          "...KRRRRRRRRRK..",
+          "...KrrrrrrrrrK..",
+          "..........KrrrrK",
+          "..........KKKKK."
+        ]
+      }
+    },
+    "beanie": {
+      "coversHair": true,
+      "down": {
+        "y": 0,
+        "rows": [
+          ".......WW.......",
+          "......WWWW......",
+          ".....KBBBBK.....",
+          "....KBBbbBBK....",
+          "...KBbBBBBbBK...",
+          "...KBbBBBBbBK...",
+          "..KLLLLLLLLLLK..",
+          "..KLLLLLLLLLLK..",
+          "...KKKKKKKKKK..."
+        ]
+      },
+      "up": {
+        "y": 0,
+        "rows": [
+          ".......WW.......",
+          "......WWWW......",
+          ".....KBBBBK.....",
+          "....KBBbbBBK....",
+          "...KBbBBBBbBK...",
+          "...KBbBBBBbBK...",
+          "..KLLLLLLLLLLK..",
+          "..KLLLLLLLLLLK..",
+          "...KKKKKKKKKK..."
+        ]
+      },
+      "right": {
+        "y": 1,
+        "rows": [
+          ".......WW.......",
+          "......WWWW......",
+          "......KBBBK.....",
+          ".....KBBbBBK....",
+          "....KBbBBBbBK...",
+          "...KBBbBBBBbBK..",
+          "...KBBbBBBBbBK..",
+          "..KLLLLLLLLLLLK.",
+          "..KLLLLLLLLLLLK.",
+          "...KKKKKKKKKKK.."
+        ]
+      }
+    },
+    "tophat": {
+      "coversHair": true,
+      "down": {
+        "y": 0,
+        "rows": [
+          "....KKKKKKKK....",
+          "....KkkkkkkK....",
+          "....KkkkkkkK....",
+          "....KRRRRRRK....",
+          "..KkkkkkkkkkkK..",
+          "..KKKKKKKKKKKK.."
+        ]
+      },
+      "up": {
+        "y": 0,
+        "rows": [
+          "....KKKKKKKK....",
+          "....KkkkkkkK....",
+          "....KkkkkkkK....",
+          "....KRRRRRRK....",
+          "..KkkkkkkkkkkK..",
+          "..KKKKKKKKKKKK.."
+        ]
+      },
+      "right": {
+        "y": 1,
+        "rows": [
+          ".....KKKKKKK....",
+          ".....KkkkkkK....",
+          ".....KkkkkkK....",
+          ".....KkkkkkK....",
+          ".....KRRRRRK....",
+          "...KkkkkkkkkkK..",
+          "...KKKKKKKKKKK.."
+        ]
+      }
+    },
+    "crown": {
+      "coversHair": false,
+      "down": {
+        "y": 0,
+        "rows": [
+          "....Y..YY..Y....",
+          "....YY.YY.YY....",
+          "....YYYYYYYY....",
+          "....YGYCCYGY....",
+          "....yyyyyyyy...."
+        ]
+      },
+      "up": {
+        "y": 0,
+        "rows": [
+          "....Y..YY..Y....",
+          "....YY.YY.YY....",
+          "....YYYYYYYY....",
+          "....YGYCCYGY....",
+          "....yyyyyyyy...."
+        ]
+      },
+      "right": {
+        "y": 2,
+        "rows": [
+          ".....Y..Y..Y....",
+          ".....YYYYYYY....",
+          ".....YGYCYGY....",
+          ".....yyyyyyy...."
+        ]
+      }
+    },
+    "partyhat": {
+      "coversHair": false,
+      "down": {
+        "y": 0,
+        "rows": [
+          ".......WW.......",
+          ".......MM.......",
+          "......MYYM......",
+          "......MMMM......",
+          ".....MCCCCM.....",
+          ".....MMMMMM....."
+        ]
+      },
+      "up": {
+        "y": 0,
+        "rows": [
+          ".......WW.......",
+          ".......MM.......",
+          "......MYYM......",
+          "......MMMM......",
+          ".....MCCCCM.....",
+          ".....MMMMMM....."
+        ]
+      },
+      "right": {
+        "y": 2,
+        "rows": [
+          "........WW......",
+          "........MM......",
+          ".......MYYM.....",
+          ".......MMMM.....",
+          "......MCCCCM....",
+          "......MMMMMM...."
+        ]
+      }
+    },
+    "headphones": {
+      "coversHair": false,
+      "down": {
+        "y": 1,
+        "rows": [
+          ".....DDDDDD.....",
+          "....D......D....",
+          "...D........D...",
+          "..D..........D..",
+          "..D..........D..",
+          "..D..........D..",
+          ".D............D.",
+          ".D............D.",
+          "DDD..........DDD",
+          "DgD..........DgD",
+          "DAD..........DAD",
+          "DDD..........DDD"
+        ]
+      },
+      "up": {
+        "y": 1,
+        "rows": [
+          ".....DDDDDD.....",
+          "....D......D....",
+          "...D........D...",
+          "..D..........D..",
+          "..D..........D..",
+          "..D..........D..",
+          ".D............D.",
+          ".D............D.",
+          "DDD..........DDD",
+          "DgD..........DgD",
+          "DAD..........DAD",
+          "DDD..........DDD"
+        ]
+      },
+      "right": {
+        "y": 3,
+        "rows": [
+          ".....DDDDDD.....",
+          "....D......D....",
+          "....D...........",
+          "....D...........",
+          "....D...........",
+          "....D...........",
+          "....D...........",
+          "...DDDD.........",
+          "...DgAD.........",
+          "...DAgD.........",
+          "...DDDD........."
+        ]
+      }
+    },
+    "glasses": {
+      "coversHair": false,
+      "down": {
+        "y": 12,
+        "rows": ["....KKKKKKKK....", "...KK..KK..KK...", "....K..KK..K...."]
+      },
+      "up": { "y": 0, "rows": [] },
+      "right": {
+        "y": 14,
+        "rows": ["...........KKKK.", ".......KKKKK..K.", "...........K..K."]
+      }
+    },
+    "sunglasses": {
+      "coversHair": false,
+      "down": {
+        "y": 12,
+        "rows": ["....KKKKKKKK....", "...KKSsKKSsKK...", "....KSSKKSSK...."]
+      },
+      "up": { "y": 0, "rows": [] },
+      "right": {
+        "y": 14,
+        "rows": ["...........KKKK.", ".......KKKKKSsK.", "...........KSSK."]
+      }
+    },
+    "flower": {
+      "coversHair": false,
+      "down": {
+        "y": 3,
+        "rows": ["............P...", "...........PYP..", "............P...", "...........G...."]
+      },
+      "up": {
+        "y": 3,
+        "rows": ["...P............", "..PYP...........", "...P............", "....G..........."]
+      },
+      "right": {
+        "y": 5,
+        "rows": ["......P.........", ".....PYP........", "......P.........", ".....G.........."]
+      }
+    },
+    "bow": {
+      "coversHair": false,
+      "down": {
+        "y": 1,
+        "rows": [".....rR..Rr.....", ".....RRrrRR.....", ".....rR..Rr....."]
+      },
+      "up": {
+        "y": 1,
+        "rows": [".....rR..Rr.....", ".....RRrrRR.....", ".....rR..Rr....."]
+      },
+      "right": {
+        "y": 3,
+        "rows": [".......rR..Rr...", ".......RRrrRR...", ".......rR..Rr..."]
+      }
+    },
+    "halo": {
+      "coversHair": false,
+      "down": { "y": 0, "rows": ["....yHHHHHHy....", ".....yyyyyy....."] },
+      "up": { "y": 0, "rows": ["....yHHHHHHy....", ".....yyyyyy....."] },
+      "right": { "y": 2, "rows": [".....yHHHHy.....", "......yyyy......"] }
+    }
+  }
+}

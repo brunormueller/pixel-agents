@@ -1,0 +1,44 @@
+{
+  "id": "MONITOR",
+  "name": "Monitor",
+  "category": "decor",
+  "canPlaceOnWalls": false,
+  "canPlaceOnSurfaces": true,
+  "type": "group",
+  "groupType": "rotation",
+  "rotationScheme": "3-way-mirror",
+  "backgroundTiles": 0,
+  "members": [
+    {
+      "type": "asset",
+      "id": "MONITOR_FRONT",
+      "file": "MONITOR_FRONT.png",
+      "width": 16,
+      "height": 16,
+      "footprintW": 1,
+      "footprintH": 1,
+      "orientation": "front"
+    },
+    {
+      "type": "asset",
+      "id": "MONITOR_BACK",
+      "file": "MONITOR_BACK.png",
+      "width": 16,
+      "height": 16,
+      "footprintW": 1,
+      "footprintH": 1,
+      "orientation": "back"
+    },
+    {
+      "type": "asset",
+      "id": "MONITOR_SIDE",
+      "file": "MONITOR_SIDE.png",
+      "width": 16,
+      "height": 16,
+      "footprintW": 1,
+      "footprintH": 1,
+      "orientation": "side",
+      "mirrorSide": true
+    }
+  ]
+}

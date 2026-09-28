@@ -1,0 +1,13 @@
+{
+  "id": "MOUSE",
+  "name": "Mouse",
+  "category": "decor",
+  "canPlaceOnWalls": false,
+  "canPlaceOnSurfaces": true,
+  "type": "asset",
+  "width": 16,
+  "height": 16,
+  "footprintW": 1,
+  "footprintH": 1,
+  "backgroundTiles": 0
+}

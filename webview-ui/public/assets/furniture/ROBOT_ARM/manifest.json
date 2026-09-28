@@ -1,0 +1,33 @@
+{
+  "id": "ROBOT_ARM",
+  "name": "Robot arm",
+  "category": "decor",
+  "canPlaceOnWalls": false,
+  "canPlaceOnSurfaces": true,
+  "type": "group",
+  "groupType": "rotation",
+  "rotationScheme": "2-way",
+  "backgroundTiles": 1,
+  "members": [
+    {
+      "type": "asset",
+      "id": "ROBOT_ARM_FRONT",
+      "file": "ROBOT_ARM_FRONT.png",
+      "width": 32,
+      "height": 32,
+      "footprintW": 2,
+      "footprintH": 2,
+      "orientation": "front"
+    },
+    {
+      "type": "asset",
+      "id": "ROBOT_ARM_SIDE",
+      "file": "ROBOT_ARM_SIDE.png",
+      "width": 32,
+      "height": 32,
+      "footprintW": 2,
+      "footprintH": 2,
+      "orientation": "side"
+    }
+  ]
+}

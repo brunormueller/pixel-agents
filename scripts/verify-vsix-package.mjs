@@ -63,7 +63,7 @@ exports.run = async () => {
   if (!extension) throw new Error('Packaged extension was not discoverable: ${extensionId}');
   await extension.activate();
   if (!extension.isActive) throw new Error('Packaged extension did not activate');
-  await vscode.commands.executeCommand('pixel-agents.showPanel');
+  await vscode.commands.executeCommand('pixel-agents-cloud.showPanel');
 
   const registryDir = path.join(os.homedir(), '.pixel-agents', 'servers');
   const deadline = Date.now() + 10_000;

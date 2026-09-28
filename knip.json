@@ -8,7 +8,8 @@
     "fastify",
     "@fastify/cors",
     "@fastify/static",
-    "@fastify/websocket"
+    "@fastify/websocket",
+    "ws"
   ],
   "ignoreExportsUsedInFile": true,
   "ignore": [

@@ -13,12 +13,15 @@ import type {
   SetHooksEnabledSideEffect,
 } from './clientMessageHandler.js';
 import { handleClientMessage } from './clientMessageHandler.js';
+import type { ConfigNamespace } from './configPersistence.js';
 import {
   HOOK_API_PREFIX,
   MAX_HOOK_BODY_SIZE,
   WS_CLOSE_FORBIDDEN_ORIGIN,
   WS_CLOSE_UNAUTHORIZED,
 } from './constants.js';
+import type { Integrations } from './integrations/index.js';
+import type { MultiplayerClient } from './multiplayer/multiplayerClient.js';
 import type { AgentState } from './types.js';
 
 /** Options for creating the HTTP + WebSocket server. */
@@ -45,6 +48,19 @@ export interface HttpServerOptions {
   onSetHooksEnabled?: SetHooksEnabledSideEffect;
   /** Invoked when an external asset directory is added/removed. Standalone reloads + re-broadcasts assets here. */
   onReloadAssets?: ReloadAssetsSideEffect;
+  /** Multiplayer relay client, so a connecting client gets the remote peers on webviewReady. */
+  multiplayer?: MultiplayerClient;
+  /** Calendar + Spotify (standalone). */
+  integrations?: Integrations;
+  /** No Fastify request log (a VS Code window's web view: the extension host's output stays readable). */
+  quiet?: boolean;
+  /** Pages of an office whose HOST owns agent restore and hooks (a VS Code window's web view): see
+   *  ClientMessageContext.hostOwned. */
+  hostOwned?: boolean;
+  /** Whose settings (area mappings) this office uses. Default 'standalone'. */
+  configNamespace?: ConfigNamespace;
+  /** Tokened pages connected over /ws (counted from their webviewReady to their close). */
+  onPagesChanged?: (count: number) => void;
 }
 
 /** Result of createHttpServer(). */
@@ -63,7 +79,7 @@ const startTime = Date.now();
  */
 export async function createHttpServer(options: HttpServerOptions): Promise<HttpServerHandle> {
   const app = Fastify({
-    logger: !options.embedded,
+    logger: !options.embedded && !options.quiet,
     bodyLimit: MAX_HOOK_BODY_SIZE,
   });
 
@@ -143,6 +159,7 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
 // ── WebSocket ──────────────────────────────────────────────────
 
 function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions): void {
+  let pages = 0;
   app.get('/ws', { websocket: true }, (socket, request) => {
     // CONNECTION gate. Embedded (VS Code) requires the Bearer token. Standalone
     // requires a same-origin handshake instead (isAllowedWebSocketOrigin), so a
@@ -196,13 +213,18 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
     store.on('agentAdded', onAgentAdded);
     store.on('agentRemoved', onAgentRemoved);
     store.on('broadcast', onBroadcast);
+    let countedPage = false;
 
     // Handle incoming client messages
     socket.on('message', (data: Buffer | string) => {
       try {
         const msg = JSON.parse(data.toString()) as Record<string, unknown>;
-        if (!options.embedded && msg.type) {
+        if (!options.embedded && !options.quiet && msg.type) {
           console.log('[Pixel Agents] WS client message:', msg.type);
+        }
+        if (msg.type === 'webviewReady' && privileged && !countedPage) {
+          countedPage = true;
+          options.onPagesChanged?.(++pages);
         }
         handleClientMessage(msg, (m) => safeSend(socket, m), {
           store,
@@ -210,7 +232,11 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
           cache: options.assetCache ?? null,
           onSetHooksEnabled: options.onSetHooksEnabled,
           onReloadAssets: options.onReloadAssets,
+          multiplayer: options.multiplayer,
+          integrations: options.integrations,
           privileged,
+          hostOwned: options.hostOwned,
+          configNamespace: options.configNamespace,
         });
       } catch {
         // Malformed JSON, ignore
@@ -221,6 +247,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
       store.off('agentAdded', onAgentAdded);
       store.off('agentRemoved', onAgentRemoved);
       store.off('broadcast', onBroadcast);
+      if (countedPage) options.onPagesChanged?.(--pages);
     });
   });
 }

@@ -139,7 +139,7 @@ export function IntroBubble({
       if (ch && bubble && container && bubble.offsetWidth > 0) {
         officeState.setGreeterCameraTarget(
           computeIntroBubbleGeometry({
-            layout: officeState.getLayout(),
+            layout: officeState.getView(),
             containerRect: container.getBoundingClientRect(),
             zoom,
             pan: panRef.current,
@@ -189,7 +189,7 @@ export function IntroBubble({
   let tailSquares: Array<{ x: number; y: number; size: number }> = [];
   if (greeter) {
     const geometry = computeIntroBubbleGeometry({
-      layout: officeState.getLayout(),
+      layout: officeState.getView(),
       containerRect: rect,
       zoom,
       pan: panRef.current,

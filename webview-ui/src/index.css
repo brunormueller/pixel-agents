@@ -160,6 +160,12 @@
     background: var(--color-accent-bright);
   }
 
+  /* Chat speech bubble pop-in (ChatBubbles): stepped, so it reads as pixel art rather than a smooth tween */
+  .chat-bubble-pop {
+    transform-origin: 50% 100%;
+    animation: chat-bubble-pop 0.24s steps(4, end) both;
+  }
+
   /* Pulsing dot animation (DebugView, ToolOverlay) */
   .pixel-pulse {
     animation: pixel-pulse 1.5s ease-in-out infinite;
@@ -196,4 +202,35 @@
   50% {
     opacity: 0.3;
   }
+}
+
+@keyframes chat-bubble-pop {
+  0% {
+    transform: scale(0.2);
+  }
+  60% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Meetings: a reaction rises over the tile and fades. */
+@keyframes meeting-reaction-float {
+  0% {
+    transform: translateY(0) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    transform: translateY(-12px) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-110px) scale(1);
+    opacity: 0;
+  }
+}
+.meeting-reaction-float {
+  animation: meeting-reaction-float 2.5s ease-out forwards;
 }

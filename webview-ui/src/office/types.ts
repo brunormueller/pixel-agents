@@ -30,8 +30,86 @@ export const CharacterState = {
   IDLE: 'idle',
   WALK: 'walk',
   TYPE: 'type',
+  /** Standing at a game table end, playing (standing frame + hand overlay) */
+  PLAY: 'play',
+  /** Waiting beside a full game table for an end to free up */
+  QUEUE: 'queue',
 } as const;
 export type CharacterState = (typeof CharacterState)[keyof typeof CharacterState];
+
+/** A standing spot beside a ping pong table. One per table end (left/right). */
+export interface GameSlot {
+  /** Table furniture uid */
+  uid: string;
+  /** Table kind: catalog groupId (one of GAME_TABLE_GROUP_IDS) — picks the hand overlay */
+  game: string;
+  /** 0 = left end, 1 = right end — index into GameMatch.scores */
+  side: 0 | 1;
+  col: number;
+  row: number;
+  /** Direction the player faces (toward the table) */
+  dir: Direction;
+}
+
+/** A spectator spot beside a game table where queued agents wait their turn. */
+export interface WaitSpot {
+  /** Table furniture uid */
+  uid: string;
+  col: number;
+  row: number;
+  /** Direction the waiting agent faces (toward the table) */
+  dir: Direction;
+  /** Set when the spot is a nearby chair/sofa seat: the spectator sits while waiting */
+  seatId?: string;
+}
+
+export type RallyPhase = 'rally' | 'miss' | 'pickup';
+
+/** A game in progress at one table: both ends taken, a ball in play. */
+export interface GameMatch {
+  uid: string;
+  game: string;
+  /** Points per side: [left, right] */
+  scores: [number, number];
+  /** rally = ball in flight toward `to`; miss = flew past `to`; pickup = `to` fetches it */
+  phase: RallyPhase;
+  /** Side the ball is travelling toward (or that missed / is picking up) */
+  to: 0 | 1;
+  /** 0..1 progress through the current phase */
+  t: number;
+  /** Returns left before this rally ends in a miss */
+  hitsLeft: number;
+  /** Set once someone reached GAME_WIN_SCORE; players leave after the celebration */
+  winner: 0 | 1 | null;
+}
+
+/** A ball to draw: world px position (center) plus colours. */
+export interface GameBall {
+  x: number;
+  y: number;
+  color: string;
+  shade: string;
+}
+
+/** What renderFrame needs to draw a scoreboard above a table. World pixel coords. */
+export interface Scoreboard {
+  /** Horizontal center */
+  x: number;
+  /** Baseline (bottom) — text is drawn above this */
+  y: number;
+  text: string;
+}
+
+/** A label over a character riding stairs or an elevator: which way, to which level. World px. */
+export interface TransitLabel {
+  /** Horizontal center */
+  x: number;
+  /** Baseline (bottom) */
+  y: number;
+  text: string;
+  /** Going up (false: down) */
+  up: boolean;
+}
 
 export const Direction = {
   DOWN: 0,
@@ -98,6 +176,8 @@ export interface FurnitureCatalogEntry {
   sprite: SpriteData;
   isDesk: boolean;
   category?: string;
+  /** Manifest id shared by every variant (orientation/state/frame) of one furniture item */
+  groupId?: string;
   /** Orientation from rotation group: 'front' | 'back' | 'left' | 'right' */
   orientation?: string;
   /** Whether this item can be placed on top of desk/table surfaces */
@@ -117,6 +197,59 @@ export interface PlacedFurniture {
   row: number;
   /** Optional color override for furniture */
   color?: ColorValue;
+  /** Stairs and elevators: every portal sharing this id is connected to the
+   *  others (a staircase pair, or an elevator's stops). See layout/portals.ts. */
+  link?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEVELS — the floors of a building. Each is a rectangle of the one layout grid
+// (side by side, a VOID column apart); only one is shown at a time. Stairs and
+// elevators (portals) connect them. See layout/levels.ts.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface OfficeLevel {
+  /** Stable id (portals and the view refer to it). */
+  id: string;
+  /** Shown in the level switcher, e.g. "Ground floor". */
+  name: string;
+  /** Height order: higher is upstairs. Going to a higher level goes up. */
+  elevation: number;
+  /** The level's rectangle in the layout grid. */
+  col: number;
+  row: number;
+  cols: number;
+  rows: number;
+}
+
+/** A walk step. `portal` is set on the step reached by taking stairs or an elevator. */
+export interface PathStep {
+  col: number;
+  row: number;
+  portal?: PortalHop;
+}
+
+/** One ride through a portal, as a path step carries it. */
+export interface PortalHop {
+  kind: 'stairs' | 'elevator';
+  /** Elevation difference: > 0 goes up, < 0 goes down. */
+  rise: number;
+  /** Portal furniture uids entered and left. */
+  fromUid: string;
+  toUid: string;
+  /** Level arrived on (for the label shown while riding). */
+  toLevelId: string;
+}
+
+/** A character riding a portal: leaving the source tile (t < 0.5), then arriving (t ≥ 0.5). */
+export interface Transit {
+  hop: PortalHop;
+  /** 0..1 through the ride. */
+  t: number;
+  from: { col: number; row: number };
+  to: { col: number; row: number };
+  /** Moved to `to` (happens at t = 0.5). */
+  arrived: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -163,6 +296,8 @@ export interface OfficeLayout {
   areas?: AreaDefinition[];
   /** Per-tile Area label, parallel to tiles array. null = no area assignment. */
   areaTiles?: Array<string | null>;
+  /** The building's levels. Absent = one level, the whole grid. */
+  levels?: OfficeLevel[];
 }
 
 export interface Character {
@@ -177,9 +312,11 @@ export interface Character {
   /** Current tile row */
   tileRow: number;
   /** Remaining path steps (tile coords) */
-  path: Array<{ col: number; row: number }>;
+  path: PathStep[];
   /** 0-1 lerp between current tile and next tile */
   moveProgress: number;
+  /** Riding stairs or an elevator to another level, or null/absent. */
+  transit?: Transit | null;
   /** Current tool name for typing vs reading animation, or null */
   currentTool: string | null;
   /** Palette index (0-5) */
@@ -211,6 +348,16 @@ export interface Character {
   bubbleTimer: number;
   /** Timer to stay seated while inactive after seat reassignment (counts down to 0) */
   seatTimer: number;
+  /** Ping pong slot this character claimed (walking to it or playing at it), or null */
+  playSlot: GameSlot | null;
+  /** Wait spot this character claimed (walking to it or standing on it), or null */
+  waitSpot: WaitSpot | null;
+  /** Monotonic ticket taken when joining a queue; lowest waits longest and goes first */
+  queuedAt: number;
+  /** Seconds of celebration hop left after scoring a point (0 = none) */
+  celebrateTimer: number;
+  /** Seconds the swing frame is held after hitting the ball (0 = ready pose) */
+  swingTimer: number;
   /** Whether this character represents a sub-agent (spawned by Task tool) */
   isSubagent: boolean;
   /** Parent agent ID if this is a sub-agent, null otherwise */
@@ -233,6 +380,28 @@ export interface Character {
    *  per-consumer guard reads this flag. It exists for the render/e2e snapshot
    *  (testHooks.getCharacters) to tell the greeter from agents. */
   isGreeter?: boolean;
+  /** Another office's agent (multiplayer): simulated here from relayed state,
+   *  never persisted, never focusable — there is no terminal on this machine. */
+  isRemote?: boolean;
+  /** Display name of the office a remote character belongs to. */
+  remotePeerName?: string;
+  /** Multiplayer: the person's own character — this office's, or (with isRemote)
+   *  another office's. The office's first Claude agent IS this character. */
+  isAvatar?: boolean;
+  /** Multiplayer, shared room map: where another office says this character
+   *  is. Set = the character follows it instead of running its own FSM. */
+  remoteTarget?: { x: number; y: number; dir: Direction; state: 'idle' | 'walk' | 'type' | 'read' };
+  /** Emote playing (dance, reaction...): a visual layer over the FSM, see engine/emotes.ts. */
+  emote?: { kind: import('./engine/emotes.js').EmoteKind; t: number; seq: number } | null;
+  /** Multiplayer: the look the person picked for their character. Replaces
+   *  palette + hueShift for drawing (see sprites/avatarLook.ts). */
+  look?: import('../../../core/src/messages.js').AvatarLook | null;
+  /** Multiplayer: the person's status, their own status words, and the song they share. */
+  personStatus?: import('../../../core/src/messages.js').PersonStatus;
+  statusText?: string;
+  music?: import('../../../core/src/messages.js').SharedTrack | null;
+  /** Remote characters: the office (relay peer) they belong to. */
+  remotePeerId?: string;
 
   // -- Agent Teams --
   /** Team name this agent belongs to */

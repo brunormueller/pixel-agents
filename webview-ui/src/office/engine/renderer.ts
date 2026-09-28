@@ -23,6 +23,8 @@ import {
   CHARACTER_Z_SORT_OFFSET,
   DELETE_BUTTON_BG,
   FALLBACK_FLOOR_COLOR,
+  GAME_CELEBRATE_HOP_PX,
+  GAME_CELEBRATE_HOPS_PER_SEC,
   GHOST_BORDER_HOVER_FILL,
   GHOST_BORDER_HOVER_STROKE,
   GHOST_BORDER_STROKE,
@@ -35,16 +37,26 @@ import {
   HOVERED_OUTLINE_ALPHA,
   OUTLINE_Z_SORT_OFFSET,
   ROTATE_BUTTON_BG,
+  SCOREBOARD_COLOR,
+  SCOREBOARD_FONT_SIZE_PX,
+  SCOREBOARD_MIN_FONT_SIZE_PX,
+  SCOREBOARD_SHADOW_COLOR,
   SEAT_AVAILABLE_COLOR,
   SEAT_BUSY_COLOR,
   SEAT_OWN_COLOR,
   SELECTED_OUTLINE_ALPHA,
   SELECTION_DASH_PATTERN,
   SELECTION_HIGHLIGHT_COLOR,
+  TRANSIT_LABEL_DOWN_COLOR,
+  TRANSIT_LABEL_FONT_SIZE_PX,
+  TRANSIT_LABEL_MIN_FONT_SIZE_PX,
+  TRANSIT_LABEL_SHADOW_COLOR,
+  TRANSIT_LABEL_UP_COLOR,
   VOID_TILE_DASH_PATTERN,
   VOID_TILE_OUTLINE_COLOR,
 } from '../../constants.js';
 import { getColorizedFloorSprite, hasFloorSprites, WALL_COLOR } from '../floorTiles.js';
+import type { GridRect } from '../layout/levels.js';
 import { mapOffset } from '../projection.js';
 import {
   getCarpetJunctionSprite,
@@ -64,16 +76,36 @@ import type {
   CarpetTile,
   Character,
   FurnitureInstance,
+  GameBall,
   Pet,
+  Scoreboard,
   Seat,
   SpriteData,
   TileType as TileTypeVal,
+  TransitLabel,
 } from '../types.js';
-import { CharacterState, TILE_SIZE, TileType } from '../types.js';
+import { TILE_SIZE, TileType } from '../types.js';
 import { getWallInstances, hasWallSprites, wallColorToHex } from '../wallTiles.js';
-import { getCharacterSprite } from './characters.js';
+import { getCharacterSprite, isSeatedPose } from './characters.js';
+import { emoteLook } from './emotes.js';
 import { renderMatrixEffect } from './matrixEffect.js';
 import { getPetSpriteData } from './petEntity.js';
+import { transitLook } from './transit.js';
+
+/** Loop bounds of `rect` clamped to a cols × rows grid (the whole grid without a rect). */
+function spanOf(
+  rect: GridRect | undefined,
+  cols: number,
+  rows: number,
+): { c0: number; c1: number; r0: number; r1: number } {
+  if (!rect) return { c0: 0, c1: cols, r0: 0, r1: rows };
+  return {
+    c0: Math.max(0, rect.col),
+    c1: Math.min(cols, rect.col + rect.cols),
+    r0: Math.max(0, rect.row),
+    r1: Math.min(rows, rect.row + rect.rows),
+  };
+}
 
 // ── Settings ────────────────────────────────────────────────────
 
@@ -117,15 +149,17 @@ export function renderCarpetLayer(
   offsetX: number,
   offsetY: number,
   zoom: number,
+  rect?: GridRect,
 ): void {
   if (!hasCarpetSprites()) return;
   if (!carpetTiles || carpetTiles.length === 0) return;
 
   const s = TILE_SIZE * zoom;
   const halfS = s / 2;
+  const { c0, c1, r0, r1 } = spanOf(rect, cols, rows);
 
-  for (let jy = 0; jy <= rows; jy++) {
-    for (let jx = 0; jx <= cols; jx++) {
+  for (let jy = r0; jy <= r1; jy++) {
+    for (let jx = c0; jx <= c1; jx++) {
       const localGroups = new Map<
         string,
         {
@@ -202,6 +236,7 @@ export function renderAreaOverlay(
   offsetY: number,
   zoom: number,
   activeAreaLabel?: string | null,
+  rect?: GridRect,
 ): void {
   if (!areaTiles || areaTiles.length === 0) return;
   if (!areas || areas.length === 0) return;
@@ -209,10 +244,11 @@ export function renderAreaOverlay(
   const s = TILE_SIZE * zoom;
   const colorMap = new Map<string, string>();
   for (const a of areas) colorMap.set(a.label, a.color);
+  const { c0, c1, r0, r1 } = spanOf(rect, cols, rows);
 
   ctx.save();
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
+  for (let r = r0; r < r1; r++) {
+    for (let c = c0; c < c1; c++) {
       const label = areaTiles[r * cols + c];
       if (!label) continue;
       const color = colorMap.get(label);
@@ -244,6 +280,7 @@ export function renderAreaLabels(
   offsetX: number,
   offsetY: number,
   zoom: number,
+  rect?: GridRect,
 ): void {
   if (!areaTiles || areaTiles.length === 0) return;
   if (!areas || areas.length === 0) return;
@@ -251,11 +288,12 @@ export function renderAreaLabels(
   const s = TILE_SIZE * zoom;
   const colorMap = new Map<string, string>();
   for (const a of areas) colorMap.set(a.label, a.color);
+  const { c0, c1, r0, r1 } = spanOf(rect, cols, rows);
 
-  // Centroid accumulator: label → { sumX, sumY, count }.
+  // Centroid accumulator: label → { sumX, sumY, count } (over the tiles on screen).
   const centroids = new Map<string, { sumX: number; sumY: number; count: number }>();
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
+  for (let r = r0; r < r1; r++) {
+    for (let c = c0; c < c1; c++) {
       const label = areaTiles[r * cols + c];
       if (!label) continue;
       const acc = centroids.get(label);
@@ -295,6 +333,93 @@ export function renderAreaLabels(
   ctx.restore();
 }
 
+/** Draw each ball as a 2×2 sprite-pixel dot (colour on top, shade below). */
+export function renderBalls(
+  ctx: CanvasRenderingContext2D,
+  balls: GameBall[],
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+): void {
+  for (const b of balls) {
+    const x = Math.round(offsetX + (b.x - 1) * zoom);
+    const y = Math.round(offsetY + (b.y - 1) * zoom);
+    ctx.fillStyle = b.color;
+    ctx.fillRect(x, y, 2 * zoom, zoom);
+    ctx.fillStyle = b.shade;
+    ctx.fillRect(x, y + zoom, 2 * zoom, zoom);
+  }
+}
+
+/** Draw "2 - 1" style scores above game tables in play. */
+export function renderScoreboards(
+  ctx: CanvasRenderingContext2D,
+  boards: Scoreboard[],
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+): void {
+  const fontSize = Math.max(SCOREBOARD_FONT_SIZE_PX * zoom, SCOREBOARD_MIN_FONT_SIZE_PX);
+  ctx.save();
+  ctx.font = `bold ${fontSize}px 'FS Pixel Sans'`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  for (const b of boards) {
+    const x = Math.round(offsetX + b.x * zoom);
+    const y = Math.round(offsetY + b.y * zoom);
+    ctx.fillStyle = SCOREBOARD_SHADOW_COLOR;
+    ctx.fillText(b.text, x + 1, y + 1);
+    ctx.fillStyle = SCOREBOARD_COLOR;
+    ctx.fillText(b.text, x, y);
+  }
+  ctx.restore();
+}
+
+/** An arrow and the level a rider is going to, over their head: up green, down orange. */
+export function renderTransitLabels(
+  ctx: CanvasRenderingContext2D,
+  labels: TransitLabel[],
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+): void {
+  const fontSize = Math.max(TRANSIT_LABEL_FONT_SIZE_PX * zoom, TRANSIT_LABEL_MIN_FONT_SIZE_PX);
+  const tri = Math.max(4, Math.round(fontSize * 0.7));
+  const gap = Math.max(2, Math.round(fontSize * 0.3));
+  ctx.save();
+  ctx.font = `bold ${fontSize}px 'FS Pixel Sans'`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'bottom';
+  const arrow = (x: number, y: number, up: boolean) => {
+    const h = Math.round(tri * 0.8);
+    const base = y - Math.round(fontSize * 0.25);
+    ctx.beginPath();
+    if (up) {
+      ctx.moveTo(x, base);
+      ctx.lineTo(x + tri, base);
+      ctx.lineTo(x + tri / 2, base - h);
+    } else {
+      ctx.moveTo(x, base - h);
+      ctx.lineTo(x + tri, base - h);
+      ctx.lineTo(x + tri / 2, base);
+    }
+    ctx.closePath();
+    ctx.fill();
+  };
+  for (const l of labels) {
+    const w = tri + gap + ctx.measureText(l.text).width;
+    const x = Math.round(offsetX + l.x * zoom - w / 2);
+    const y = Math.round(offsetY + l.y * zoom);
+    ctx.fillStyle = TRANSIT_LABEL_SHADOW_COLOR;
+    arrow(x + 1, y + 1, l.up);
+    ctx.fillText(l.text, x + tri + gap + 1, y + 1);
+    ctx.fillStyle = l.up ? TRANSIT_LABEL_UP_COLOR : TRANSIT_LABEL_DOWN_COLOR;
+    arrow(x, y, l.up);
+    ctx.fillText(l.text, x + tri + gap, y);
+  }
+  ctx.restore();
+}
+
 /** @internal */
 export function renderTileGrid(
   ctx: CanvasRenderingContext2D,
@@ -304,16 +429,18 @@ export function renderTileGrid(
   zoom: number,
   tileColors?: Array<ColorValue | null>,
   cols?: number,
+  rect?: GridRect,
 ): void {
   const s = TILE_SIZE * zoom;
   const useSpriteFloors = hasFloorSprites();
   const tmRows = tileMap.length;
   const tmCols = tmRows > 0 ? tileMap[0].length : 0;
   const layoutCols = cols ?? tmCols;
+  const { c0, c1, r0, r1 } = spanOf(rect, tmCols, tmRows);
 
   // Floor tiles + wall base color
-  for (let r = 0; r < tmRows; r++) {
-    for (let c = 0; c < tmCols; c++) {
+  for (let r = r0; r < r1; r++) {
+    for (let c = c0; c < c1; c++) {
       const tile = tileMap[r][c];
 
       // Skip VOID tiles entirely (transparent)
@@ -389,14 +516,24 @@ export function renderScene(
 
   // Characters
   for (const ch of characters) {
-    const sprites = getCharacterSprites(ch.palette, ch.hueShift);
+    const sprites = getCharacterSprites(ch.palette, ch.hueShift, ch.look);
     const spriteData = getCharacterSprite(ch, sprites);
     const cached = getCachedSprite(spriteData, zoom);
     // Sitting offset: shift character down when seated so they visually sit in the chair
-    const sittingOffset = ch.state === CharacterState.TYPE ? CHARACTER_SITTING_OFFSET_PX : 0;
+    const sittingOffset = isSeatedPose(ch) ? CHARACTER_SITTING_OFFSET_PX : 0;
+    // Celebration hop: bounce on |sin| while the timer runs down
+    const hop =
+      (ch.celebrateTimer > 0
+        ? -GAME_CELEBRATE_HOP_PX *
+          Math.abs(Math.sin(ch.celebrateTimer * Math.PI * GAME_CELEBRATE_HOPS_PER_SEC))
+        : 0) + emoteLook(ch.emote).hop;
+    // Riding stairs / an elevator: climbing, sinking, stepping through a door.
+    const ride = transitLook(ch);
     // Anchor at bottom-center of character — round to integer device pixels
     const drawX = Math.round(offsetX + ch.x * zoom - cached.width / 2);
-    const drawY = Math.round(offsetY + (ch.y + sittingOffset) * zoom - cached.height);
+    const drawY = Math.round(
+      offsetY + (ch.y + sittingOffset + hop + (ride?.dy ?? 0)) * zoom - cached.height,
+    );
 
     // Sort characters by bottom of their tile (not center) so they render
     // in front of same-row furniture (e.g. chairs) but behind furniture
@@ -405,7 +542,29 @@ export function renderScene(
 
     // Headless agents (adopted, no terminal to focus) render translucent while
     // the "Display headless as ghosts" setting is on.
-    const alpha = ch.isHeadless && ghostHeadlessAgents ? HEADLESS_CHARACTER_ALPHA : 1;
+    const alpha =
+      (ch.isHeadless && ghostHeadlessAgents ? HEADLESS_CHARACTER_ALPHA : 1) * (ride?.alpha ?? 1);
+    if (ride) {
+      if (alpha <= 0) continue;
+      // Going down a stairwell: nothing below its front edge shows.
+      const clipY = ride.clipDy !== null ? Math.round(offsetY + (ch.y + ride.clipDy) * zoom) : null;
+      if (clipY !== null && clipY <= drawY) continue;
+      drawables.push({
+        zY: charZY,
+        draw: (c) => {
+          c.save();
+          if (clipY !== null) {
+            c.beginPath();
+            c.rect(drawX - zoom, drawY - zoom, cached.width + 2 * zoom, clipY - drawY + zoom);
+            c.clip();
+          }
+          c.globalAlpha = alpha;
+          c.drawImage(cached, drawX, drawY);
+          c.restore();
+        },
+      });
+      continue;
+    }
 
     // Matrix spawn/despawn effect — skip outline, use per-pixel rendering
     if (ch.matrixEffect) {
@@ -502,6 +661,7 @@ function renderSeatIndicators(
   offsetX: number,
   offsetY: number,
   zoom: number,
+  gameSlots?: SelectionRenderState['gameSlots'],
 ): void {
   if (selectedAgentId === null || !hoveredTile) return;
   const selectedChar = characters.get(selectedAgentId);
@@ -528,6 +688,15 @@ function renderSeatIndicators(
     ctx.fillRect(x, y, s, s);
     break;
   }
+
+  // Hovering a game table: show where the selected agent would stand
+  if (gameSlots) {
+    const s = TILE_SIZE * zoom;
+    for (const slot of gameSlots) {
+      ctx.fillStyle = slot.free ? SEAT_AVAILABLE_COLOR : SEAT_BUSY_COLOR;
+      ctx.fillRect(offsetX + slot.col * s, offsetY + slot.row * s, s, s);
+    }
+  }
 }
 
 // ── Edit mode overlays ──────────────────────────────────────────
@@ -541,22 +710,24 @@ export function renderGridOverlay(
   cols: number,
   rows: number,
   tileMap?: TileTypeVal[][],
+  rect?: GridRect,
 ): void {
   const s = TILE_SIZE * zoom;
+  const { c0, c1, r0, r1 } = spanOf(rect, cols, rows);
   ctx.strokeStyle = GRID_LINE_COLOR;
   ctx.lineWidth = 1;
   ctx.beginPath();
   // Vertical lines — offset by 0.5 for crisp 1px lines
-  for (let c = 0; c <= cols; c++) {
+  for (let c = c0; c <= c1; c++) {
     const x = offsetX + c * s + 0.5;
-    ctx.moveTo(x, offsetY);
-    ctx.lineTo(x, offsetY + rows * s);
+    ctx.moveTo(x, offsetY + r0 * s);
+    ctx.lineTo(x, offsetY + r1 * s);
   }
   // Horizontal lines
-  for (let r = 0; r <= rows; r++) {
+  for (let r = r0; r <= r1; r++) {
     const y = offsetY + r * s + 0.5;
-    ctx.moveTo(offsetX, y);
-    ctx.lineTo(offsetX + cols * s, y);
+    ctx.moveTo(offsetX + c0 * s, y);
+    ctx.lineTo(offsetX + c1 * s, y);
   }
   ctx.stroke();
 
@@ -566,8 +737,8 @@ export function renderGridOverlay(
     ctx.strokeStyle = VOID_TILE_OUTLINE_COLOR;
     ctx.lineWidth = 1;
     ctx.setLineDash(VOID_TILE_DASH_PATTERN);
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
+    for (let r = r0; r < r1; r++) {
+      for (let c = c0; c < c1; c++) {
         if (tileMap[r]?.[c] === TileType.VOID) {
           ctx.strokeRect(offsetX + c * s + 0.5, offsetY + r * s + 0.5, s - 1, s - 1);
         }
@@ -583,25 +754,25 @@ function renderGhostBorder(
   offsetX: number,
   offsetY: number,
   zoom: number,
-  cols: number,
-  rows: number,
+  rect: GridRect,
   ghostHoverCol: number,
   ghostHoverRow: number,
 ): void {
   const s = TILE_SIZE * zoom;
   ctx.save();
 
-  // Collect ghost border tiles: one ring around the grid
+  // Collect ghost border tiles: one ring around the grid (the level on screen)
+  const { col: c0, row: r0, cols, rows } = rect;
   const ghostTiles: Array<{ c: number; r: number }> = [];
   // Top and bottom rows
-  for (let c = -1; c <= cols; c++) {
-    ghostTiles.push({ c, r: -1 });
-    ghostTiles.push({ c, r: rows });
+  for (let c = c0 - 1; c <= c0 + cols; c++) {
+    ghostTiles.push({ c, r: r0 - 1 });
+    ghostTiles.push({ c, r: r0 + rows });
   }
   // Left and right columns (excluding corners already added)
-  for (let r = 0; r < rows; r++) {
-    ghostTiles.push({ c: -1, r });
-    ghostTiles.push({ c: cols, r });
+  for (let r = r0; r < r0 + rows; r++) {
+    ghostTiles.push({ c: c0 - 1, r });
+    ghostTiles.push({ c: c0 + cols, r });
   }
 
   for (const { c, r } of ghostTiles) {
@@ -773,7 +944,7 @@ function renderBubbles(
   zoom: number,
 ): void {
   for (const ch of characters) {
-    if (!ch.bubbleType) continue;
+    if (!ch.bubbleType || ch.transit) continue;
     // The green checkmark bubble only represents "done" (turn finished). The
     // idle "Waiting for input" state communicates via its overlay label, not a
     // bubble, so skip the bubble for it.
@@ -792,7 +963,7 @@ function renderBubbles(
     // Position: centered above the character's head
     // Character is anchored bottom-center at (ch.x, ch.y), sprite is 16x24
     // Place bubble above head with a small gap; follow sitting offset
-    const sittingOff = ch.state === CharacterState.TYPE ? BUBBLE_SITTING_OFFSET_PX : 0;
+    const sittingOff = isSeatedPose(ch) ? BUBBLE_SITTING_OFFSET_PX : 0;
     const bubbleX = Math.round(offsetX + ch.x * zoom - cached.width / 2);
     const bubbleY = Math.round(
       offsetY + (ch.y + sittingOff - BUBBLE_VERTICAL_OFFSET_PX) * zoom - cached.height - 1 * zoom,
@@ -880,6 +1051,8 @@ export interface SelectionRenderState {
   hoveredTile: { col: number; row: number } | null;
   seats: Map<string, Seat>;
   characters: Map<number, Character>;
+  /** Standing ends of the hovered game table, if any (green = free, red = taken) */
+  gameSlots?: Array<{ col: number; row: number; free: boolean }>;
 }
 
 export function renderFrame(
@@ -903,6 +1076,11 @@ export function renderFrame(
   showAreas?: boolean,
   activeAreaLabel?: string | null,
   pets?: Pet[],
+  scoreboards?: Scoreboard[],
+  balls?: GameBall[],
+  /** The part of the grid on screen (a building's level); the whole grid when absent. */
+  view?: GridRect,
+  transitLabels?: TransitLabel[],
 ): { offsetX: number; offsetY: number } {
   // Clear
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
@@ -910,22 +1088,52 @@ export function renderFrame(
   // Use layout dimensions (fallback to tileMap size)
   const cols = layoutCols ?? (tileMap.length > 0 ? tileMap[0].length : 0);
   const rows = layoutRows ?? tileMap.length;
+  const rect: GridRect = view ?? { col: 0, row: 0, cols, rows };
 
-  // Center map in viewport + pan offset (integer device pixels). Shared with
-  // the DOM overlays so a label lands exactly on the sprite it belongs to.
-  const { offsetX, offsetY } = mapOffset(canvasWidth, canvasHeight, cols, rows, zoom, panX, panY);
+  // Center the view in the viewport + pan offset (integer device pixels). Shared
+  // with the DOM overlays so a label lands exactly on the sprite it belongs to.
+  const { offsetX, offsetY } = mapOffset(canvasWidth, canvasHeight, rect, zoom, panX, panY);
+
+  // A building's other levels sit beside this one in the grid: draw only what
+  // stands in this level's columns, clipped to them.
+  const x0 = rect.col * TILE_SIZE;
+  const x1 = (rect.col + rect.cols) * TILE_SIZE;
+  const onScreen = (x: number) => x >= x0 && x < x1;
+  const clipped = rect.col !== 0 || rect.cols !== cols;
+  ctx.save();
+  if (clipped) {
+    const s = TILE_SIZE * zoom;
+    ctx.beginPath();
+    ctx.rect(offsetX + rect.col * s, 0, rect.cols * s, canvasHeight);
+    ctx.clip();
+    characters = characters.filter((ch) => onScreen(ch.x));
+    pets = pets?.filter((p) => onScreen(p.x));
+    balls = balls?.filter((b) => onScreen(b.x));
+    scoreboards = scoreboards?.filter((b) => onScreen(b.x));
+  }
 
   // Draw tiles (floor + wall base color)
-  renderTileGrid(ctx, tileMap, offsetX, offsetY, zoom, tileColors, layoutCols);
+  renderTileGrid(ctx, tileMap, offsetX, offsetY, zoom, tileColors, layoutCols, rect);
 
   // Carpet layer (above floor, below seat indicators / furniture / characters)
   if (carpetTiles && carpetTiles.length > 0) {
-    renderCarpetLayer(ctx, carpetTiles, cols, rows, offsetX, offsetY, zoom);
+    renderCarpetLayer(ctx, carpetTiles, cols, rows, offsetX, offsetY, zoom, rect);
   }
 
   // Area overlay (translucent color wash) — above carpets, below seat indicators
   if (showAreas) {
-    renderAreaOverlay(ctx, areaTiles, areas, cols, rows, offsetX, offsetY, zoom, activeAreaLabel);
+    renderAreaOverlay(
+      ctx,
+      areaTiles,
+      areas,
+      cols,
+      rows,
+      offsetX,
+      offsetY,
+      zoom,
+      activeAreaLabel,
+      rect,
+    );
   }
 
   // Seat indicators (below furniture/characters, on top of floor)
@@ -939,12 +1147,16 @@ export function renderFrame(
       offsetX,
       offsetY,
       zoom,
+      selection.gameSlots,
     );
   }
 
   // Build wall instances for z-sorting with furniture and characters
   const wallInstances = hasWallSprites() ? getWallInstances(tileMap, tileColors, layoutCols) : [];
-  const allFurniture = wallInstances.length > 0 ? [...wallInstances, ...furniture] : furniture;
+  let allFurniture = wallInstances.length > 0 ? [...wallInstances, ...furniture] : furniture;
+  if (clipped) {
+    allFurniture = allFurniture.filter((f) => f.x < x1 && f.x + (f.sprite[0]?.length ?? 0) > x0);
+  }
 
   // Draw walls + furniture + characters (z-sorted)
   const selectedId = selection?.selectedAgentId ?? null;
@@ -963,6 +1175,17 @@ export function renderFrame(
 
   // Speech bubbles (always on top of characters)
   renderBubbles(ctx, characters, offsetX, offsetY, zoom);
+  // Who is riding stairs / an elevator, and where to
+  if (transitLabels && transitLabels.length > 0) {
+    renderTransitLabels(ctx, transitLabels, offsetX, offsetY, zoom);
+  }
+  // Game balls in flight + scoreboards above tables in play
+  if (balls && balls.length > 0) {
+    renderBalls(ctx, balls, offsetX, offsetY, zoom);
+  }
+  if (scoreboards && scoreboards.length > 0) {
+    renderScoreboards(ctx, scoreboards, offsetX, offsetY, zoom);
+  }
   // Pet heart bubbles (same overlay pass)
   if (pets && pets.length > 0) {
     renderPetBubbles(ctx, pets, offsetX, offsetY, zoom);
@@ -970,13 +1193,14 @@ export function renderFrame(
 
   // Area labels (above bubbles + characters, below editor overlays)
   if (showAreas) {
-    renderAreaLabels(ctx, areaTiles, areas, cols, rows, offsetX, offsetY, zoom);
+    renderAreaLabels(ctx, areaTiles, areas, cols, rows, offsetX, offsetY, zoom, rect);
   }
+  ctx.restore();
 
   // Editor overlays
   if (editor) {
     if (editor.showGrid) {
-      renderGridOverlay(ctx, offsetX, offsetY, zoom, cols, rows, tileMap);
+      renderGridOverlay(ctx, offsetX, offsetY, zoom, cols, rows, tileMap, rect);
     }
     if (editor.showGhostBorder) {
       renderGhostBorder(
@@ -984,8 +1208,7 @@ export function renderFrame(
         offsetX,
         offsetY,
         zoom,
-        cols,
-        rows,
+        rect,
         editor.ghostBorderHoverCol,
         editor.ghostBorderHoverRow,
       );

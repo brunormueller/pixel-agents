@@ -44,6 +44,12 @@ export function isReadingToolName(name: string | null | undefined): boolean {
   return typeof name === 'string' && providerCaps.readingTools.has(name);
 }
 
+/** Some tool name the provider animates as reading (remote characters borrow it), or null before capabilities load. */
+export function anyReadingToolName(): string | null {
+  for (const name of providerCaps.readingTools) return name;
+  return null;
+}
+
 export function isSubagentToolName(name: string | null | undefined): boolean {
   return typeof name === 'string' && providerCaps.subagentToolNames.has(name);
 }

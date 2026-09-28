@@ -12,6 +12,13 @@ const pkgVersion = JSON.parse(
 const versionDefine = {
   'process.env.PIXEL_AGENTS_VERSION': JSON.stringify(pkgVersion),
 };
+// A team build can ship with its multiplayer relay: PIXEL_AGENTS_DEFAULT_RELAY=wss://... npm run package.
+// Unset, bundles read it from the environment at run time (configPersistence.defaultRelayUrl).
+if (process.env.PIXEL_AGENTS_DEFAULT_RELAY) {
+  versionDefine['process.env.PIXEL_AGENTS_DEFAULT_RELAY'] = JSON.stringify(
+    process.env.PIXEL_AGENTS_DEFAULT_RELAY,
+  );
+}
 
 /**
  * Copy assets folder to dist/assets
@@ -138,7 +145,7 @@ async function buildCli() {
     sourcemap: !production,
     platform: 'node',
     outfile: 'dist/cli.js',
-    external: ['fastify', '@fastify/websocket', '@fastify/static', '@fastify/cors'],
+    external: ['fastify', '@fastify/websocket', '@fastify/static', '@fastify/cors', 'ws'],
     define: versionDefine,
     logLevel: 'silent',
   });

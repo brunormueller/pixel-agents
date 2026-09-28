@@ -1,0 +1,37 @@
+# Multiplayer relay (`pixel-agents relay`) in a container — docs/multiplayer.md#run-a-relay-in-docker.
+#
+#   docker build -f Dockerfile.relay -t pixel-agents-relay .
+#   docker run -p 4100:4100 -v pixel-relay-data:/data pixel-agents-relay
+#
+# Plain ws:// on 4100; put it behind a TLS reverse proxy and have offices use wss://.
+
+FROM node:22-bookworm-slim AS build
+WORKDIR /src
+COPY package.json package-lock.json ./
+COPY server/package.json server/
+COPY webview-ui/package.json webview-ui/
+# No install scripts: only esbuild runs here, and it finds its platform binary without them.
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY . .
+RUN node esbuild.js --production
+# dist/cli.js keeps its runtime dependencies external; pin them to the versions just built against.
+RUN node -e "const p = require('./package.json'); \
+  const deps = Object.fromEntries(Object.keys(p.dependencies).map((d) => [d, require('./node_modules/' + d + '/package.json').version])); \
+  require('fs').writeFileSync('dist/relay-package.json', JSON.stringify({ name: 'pixel-agents-relay', version: p.version, private: true, dependencies: deps }, null, 2));"
+
+FROM node:22-bookworm-slim
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build /src/dist/relay-package.json ./package.json
+RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+COPY --from=build /src/dist/cli.js ./dist/cli.js
+# Room maps live in the /data volume (a named volume inherits this ownership).
+RUN mkdir -p /data/relay-rooms && chown -R node:node /data
+USER node
+VOLUME /data
+EXPOSE 4100
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD node -e "fetch('http://127.0.0.1:4100/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+ENTRYPOINT ["node", "dist/cli.js", "relay"]
+# Replaced as a whole by a compose `command:` — e.g. to add `--ice-servers /config/ice-servers.json`.
+CMD ["--host", "0.0.0.0", "--port", "4100", "--rooms-dir", "/data/relay-rooms"]

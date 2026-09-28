@@ -7,6 +7,24 @@ declare global {
   interface Window {
     __pixelAgentsTestHooks?: {
       playedSounds?: Array<{ kind: string; at: number }>;
+      /** Multiplayer room: the person's character, other offices' characters, desks others hold. */
+      getRoom?: () => {
+        avatar: {
+          id: number;
+          col: number;
+          row: number;
+          state: string;
+          seatId: string | null;
+        } | null;
+        remotes: Array<{
+          name?: string;
+          isAvatar: boolean;
+          col: number;
+          row: number;
+          state: string;
+        }>;
+        takenDesks: string[];
+      };
       getCharacters?: () => Array<{
         id: number;
         matrixEffect: 'spawn' | 'despawn' | null;
@@ -32,6 +50,22 @@ declare global {
        *  real renderer logic — for asserting carpet autotiling. */
       getCarpetJunctionCase?: (jx: number, jy: number, variant: number) => number;
       /** Area definitions in the current layout. */
+      /** Levels (floors): which is on screen, where the person is, who is riding. */
+      getLevelState?: () => {
+        view: string;
+        levels: Array<{
+          id: string;
+          name: string;
+          elevation: number;
+          col: number;
+          row: number;
+          cols: number;
+          rows: number;
+        }>;
+        avatarLevel: string | null;
+        riding: Array<{ id: number; kind: string; rise: number; t: number }>;
+        elevatorPrompt: string[] | null;
+      };
       getAreas?: () => Array<{ label: string; color: string }>;
       /** Sparse list of area-painted tiles with their grid coords. */
       getAreaTiles?: () => Array<{ col: number; row: number; label: string }>;
@@ -115,6 +149,27 @@ export function installTestHooks(officeStateRef: { current: OfficeState | null }
   if (!window.__pixelAgentsTestHooks) window.__pixelAgentsTestHooks = {};
   const hooks = window.__pixelAgentsTestHooks;
   if (!hooks.addAgentLog) hooks.addAgentLog = [];
+
+  hooks.getRoom = () => {
+    const os = officeStateRef.current;
+    if (!os) return { avatar: null, remotes: [], takenDesks: [] };
+    const ch = os.avatarId !== null ? os.characters.get(os.avatarId) : undefined;
+    return {
+      avatar: ch
+        ? { id: ch.id, col: ch.tileCol, row: ch.tileRow, state: ch.state, seatId: ch.seatId }
+        : null,
+      remotes: [...os.characters.values()]
+        .filter((c) => c.isRemote)
+        .map((c) => ({
+          name: c.remotePeerName,
+          isAvatar: c.isAvatar === true,
+          col: c.tileCol,
+          row: c.tileRow,
+          state: c.state,
+        })),
+      takenDesks: [...os.seats.keys()].filter((uid) => !os.isDeskAvailable(uid)),
+    };
+  };
 
   hooks.getCharacters = () => {
     const os = officeStateRef.current;
@@ -255,6 +310,25 @@ export function installTestHooks(officeStateRef: { current: OfficeState | null }
         areaLabel: ch.seatId ? os.seatZone(ch.seatId) : null,
         folderName: ch.folderName,
       }));
+  };
+
+  hooks.getLevelState = () => {
+    const os = officeStateRef.current;
+    if (!os) return { view: '', levels: [], avatarLevel: null, riding: [], elevatorPrompt: null };
+    return {
+      view: os.getViewLevel().id,
+      levels: os.levels.map((l) => ({ ...l })),
+      avatarLevel: os.avatarLevelId(),
+      riding: [...os.characters.values()]
+        .filter((ch) => ch.transit)
+        .map((ch) => ({
+          id: ch.id,
+          kind: ch.transit!.hop.kind,
+          rise: ch.transit!.hop.rise,
+          t: ch.transit!.t,
+        })),
+      elevatorPrompt: os.elevatorPrompt?.stops.map((s) => s.levelId) ?? null,
+    };
   };
 
   hooks.getSeats = () => {

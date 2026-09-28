@@ -1,0 +1,13 @@
+{
+  "id": "CURVED_DESK",
+  "name": "Curved desk",
+  "category": "desks",
+  "canPlaceOnWalls": false,
+  "canPlaceOnSurfaces": false,
+  "type": "asset",
+  "width": 64,
+  "height": 32,
+  "footprintW": 4,
+  "footprintH": 2,
+  "backgroundTiles": 1
+}
