@@ -86,6 +86,40 @@ npx pixel-agents relay --host 0.0.0.0 --port 4100
   stop answering pings are dropped after 30–60 s.
 - `GET /health` returns `{ ok, protocol, rooms }`.
 
+### Run a relay in Docker
+
+`Dockerfile.relay` builds the relay from source (no webview, no VS Code parts).
+It listens on `ws://0.0.0.0:4100/` and keeps room maps in the `/data` volume:
+
+```bash
+docker build -f Dockerfile.relay -t pixel-agents-relay .
+docker run -d -p 4100:4100 -v pixel-relay-data:/data pixel-agents-relay
+```
+
+Behind an nginx that already serves other things on one host and port, give
+the relay a path of its own. The trailing `/` on `proxy_pass` strips the
+prefix, since the relay answers on `/` (and `/health`):
+
+```nginx
+# in http {}: map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+location /pixel-relay/ {
+  proxy_pass http://pixel-relay:4100/;
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection $connection_upgrade;
+  proxy_set_header Host $host;
+  proxy_buffering off;
+  proxy_read_timeout 300s;   # the relay pings every 30 s
+  proxy_send_timeout 300s;
+}
+```
+
+Offices then use `wss://your.host/pixel-relay/` — **with the trailing slash**:
+nginx answers `/pixel-relay` with a redirect, and WebSocket clients don't follow
+redirects. For meetings across strict networks, mount a TURN list and pass it
+on (`command:` replaces the default arguments, so repeat them):
+`--host 0.0.0.0 --port 4100 --rooms-dir /data/relay-rooms --ice-servers /config/ice-servers.json`.
+
 ## Join a room
 
 Every office can join a room: the toolbar's **Join room** opens the **join
