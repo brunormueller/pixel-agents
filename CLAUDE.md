@@ -56,7 +56,8 @@ server/                              Lifecycle runtime + Fastify HTTP/WS server
       protocol.ts                    Relay frames + sanitizers (RemoteAgentState = core RemoteAgent; meeting presence/signal/event)
       relayServer.ts                 `pixel-agents relay`: room fan-out, last snapshot per peer, signal to ONE peer, meet events to one meeting, room map revisions (anyone edits)
       roomLayoutStore.ts             The one thing the relay persists: room maps, one hashed-name file per room (default ~/.pixel-agents/relay-rooms)
-      multiplayerClient.ts           Folds StoreEvents into a summary, publishes it (+ profile + meeting presence), broadcasts `remotePeers`/`meetingSignal`/`meetingEvent`
+      multiplayerClient.ts           Folds StoreEvents into a summary, publishes it (+ profile + meeting/match presence), broadcasts `remotePeers`/`meetingSignal`/`meetingEvent`/`gameFrame`
+      gameProtocol.ts                Games (Pixel Frag): GamePresence/FpsConfig/GameFrameBody/FpsMapData sanitizers, relay and peers alike
     integrations/                    The person's own apps (both surfaces compose one `Integrations`)
       index.ts                       Integrations: routes configureCalendar/spotifyCommand, resend, isOpenableUrl (https only)
       calendar/ics.ts                Pure iCalendar reader: TZID (IANA + Windows names + VTIMEZONE fallback), RRULE/EXDATE/RECURRENCE-ID, join links
@@ -64,7 +65,7 @@ server/                              Lifecycle runtime + Fastify HTTP/WS server
       spotify/spotifyService.ts      OAuth PKCE with the person's own client id, fixed loopback redirect, now playing + controls, `spotifyStatus`
       meetingNotes/meetingNotes.ts   `claude -p` (no tools, no session, hook skipped) writes meeting notes; saves notes + transcript to ~/.pixel-agents/meetings/
     constants.ts                     All timing/scanning constants
-  __tests__/                         34 Vitest files
+  __tests__/                         36 Vitest files
   manual-hook-events.http            Manual hook testing helper (REST-Client format)
 
 adapters/vscode/                     VS Code surface — composes core + server
@@ -92,6 +93,19 @@ webview-ui/                          React 19 + Canvas UI (depends only on core/
       recorder.ts                    Canvas compositor + mixed audio → MediaRecorder .webm (Node-tested layout)
       music.ts                       Procedural chiptune soundtrack, deterministic + seekable (synced by relay clock)
       useMeeting.ts                  The controller hook: presence heartbeat, mesh, devices, events, notes, recording, music
+    games/                           Games played from the office, see "Games (Pixel Frag)" below
+      model.ts                       Pure: roomMatches from presences, host = earliest since, cleanConfig (Node-tested)
+      useGames.ts                    The controller hook: solo / host / join / leave, presence heartbeat, frames → session
+      fps/                           Pixel Frag, the first-person shooter
+        types.ts                     Weapons, compiled map (FpsWorld), Actor, bot difficulty, input
+        sim.ts                       Pure rules: compileWorld, collision, DDA rays, hitscan, pickups, spawns, BFS, bot AI (Node-tested)
+        maps.ts                      Built-in maps (arena hand-drawn; maze + warehouse seeded) and officeMap (the floor on screen)
+        session.ts                   FpsSession: one match as this office plays it (own player, remotes, host-run bots/score/rounds)
+        render.ts                    Raycaster into a ~320×200 buffer: textured walls, floor/ceiling casting, waist-high blocks, billboards, weapon
+        sprites.ts                   Office sprites → textures: characters by facing, furniture props, map textures
+        hud.ts                       Canvas HUD: crosshair, health/ammo, clock, kill feed, minimap, scoreboard
+        audio.ts                     Web Audio synthesized sounds (no files)
+        settings.ts                  Per-browser settings (localStorage): sensitivity, FOV, volume, minimap, last setup
     browserMock.ts                   Standalone-browser asset fetch + message injection
     testHooks.ts                     window globals exposed for e2e (officeState, helpers)
     main.tsx                         React entry (StrictMode + createRoot)
@@ -119,6 +133,7 @@ webview-ui/                          React 19 + Canvas UI (depends only on core/
       sprites/
         spriteData.ts                Pixel data (characters, furniture, tiles, bubbles)
         spriteCache.ts               SpriteData → offscreen canvas, per-zoom WeakMap
+        fpsArt.ts                    Pixel Frag art: generated 16×16 textures, pickups, props, muzzle flash, weapons in hand
       editor/
         editorActions.ts             Pure layout ops
         editorState.ts               Imperative state (tools, ghost, selection, undo/redo, drag)
@@ -145,6 +160,7 @@ webview-ui/                          React 19 + Canvas UI (depends only on core/
         OfficeCanvas.tsx             Canvas, resize, DPR, mouse hit-testing, drag-to-move
         ToolOverlay.tsx              Activity label above hovered/selected character
     components/meeting/              MeetingsPanel (Meet side panel), MeetingView (stage/strip), MeetingControls, MeetingSidebar, VideoTile, Markdown, MeetingInviteToast
+    components/games/                GamesPanel (Games side panel: setup, solo, host, join), FpsGame (full-screen game: canvas, pointer lock, loop, Esc menu)
 
 e2e/                                 Playwright suite (real VS Code + mock-claude scenarios)
   playwright.config.ts
@@ -226,8 +242,8 @@ Adding a new CLI integration is one subdirectory under `server/src/providers/hoo
 
 `core/asyncapi.yaml` is the contract. Pinned to **3.0.0** because `@asyncapi/modelina@5.10.1` declares `supportedVersions: ['3.0.0']` only; bumping to 3.1.0 produces `export type Root = any`. Revisit when Modelina ships 3.1.0 support.
 
-- **45 ServerMessage variants** (server → client): agent lifecycle, agent activity, sub-agent activity, team + context usage, multiplayer (incl. `profileLoaded`, `roomLayoutRejected`), web view (`officeInBrowser`), meetings (`meetingSignal`, `meetingEvent`, `meetingNotesResult`), integrations (`calendarState`, `spotifyStatus`, `openExternalUrl`), assets, settings + workspace, diagnostics.
-- **36 ClientMessage variants** (client → server): lifecycle (`webviewReady`, `launchAgent`, `focusAgent`, `closeAgent`), layout (`saveAgentSeats`, `saveLayout`, `exportLayout`, `importLayout`), settings (`setSoundEnabled`, `setHooksEnabled`, `setWatchAllSessions`, `setAlwaysShowLabels`, `setHooksInfoShown`, `setLastSeenVersion`), multiplayer (`joinRoom`, `leaveRoom`, `presenceUpdate`, `sendChat`, `updateProfile`, `saveRoomLayout`), meetings (`updateMeetingPresence`, `sendMeetingSignal`, `sendMeetingEvent`, `generateMeetingNotes`), integrations (`configureCalendar`, `spotifyCommand`, `openExternal`, `copyWebLink`), discovery + assets, diagnostics.
+- **46 ServerMessage variants** (server → client): agent lifecycle, agent activity, sub-agent activity, team + context usage, multiplayer (incl. `profileLoaded`, `roomLayoutRejected`), web view (`officeInBrowser`), meetings (`meetingSignal`, `meetingEvent`, `meetingNotesResult`), games (`gameFrame`), integrations (`calendarState`, `spotifyStatus`, `openExternalUrl`), assets, settings + workspace, diagnostics.
+- **38 ClientMessage variants** (client → server): lifecycle (`webviewReady`, `launchAgent`, `focusAgent`, `closeAgent`), layout (`saveAgentSeats`, `saveLayout`, `exportLayout`, `importLayout`), settings (`setSoundEnabled`, `setHooksEnabled`, `setWatchAllSessions`, `setAlwaysShowLabels`, `setHooksInfoShown`, `setLastSeenVersion`), multiplayer (`joinRoom`, `leaveRoom`, `presenceUpdate`, `sendChat`, `updateProfile`, `saveRoomLayout`), meetings (`updateMeetingPresence`, `sendMeetingSignal`, `sendMeetingEvent`, `generateMeetingNotes`), games (`updateGamePresence`, `sendGameFrame`), integrations (`configureCalendar`, `spotifyCommand`, `openExternal`, `copyWebLink`), discovery + assets, diagnostics.
 
 Both unions use `oneOf` with `discriminator: type`. Every concrete message sets `additionalProperties: false`.
 
@@ -372,6 +388,17 @@ Vocabulary: **Meeting** in CONTEXT.md; user docs in `docs/multiplayer.md#meeting
 - **Transcription**: each person transcribes only their own voice (Web Speech API), only after answering the consent banner, only while unmuted; finals go out as `caption` events. **Recording** is local (canvas compositor + mixed audio → `.webm` download) and publishes `rec` so everyone sees ● REC. **Notes**: `generateMeetingNotes` → `Integrations` → `MeetingNotesService` spawns `claude -p --output-format text --no-session-persistence --tools ""` (Windows via the shell; fixed literal args, prompt on stdin), env `PIXEL_AGENTS_SKIP_HOOK=1` (the hook script exits, so this run never becomes an agent) and without `CLAUDECODE`; one at a time; the page shares the result as a `notes` event.
 - **VS Code webviews cannot capture** (no camera/mic/display permission): `mediaSupport()` disables those buttons there; receiving, chat and reactions still work. Standalone works on the tokened loopback URL (secure context). **The Web button** (`copyWebLink`, VS Code only) starts the window's **web view** on first use — `PixelAgentsViewProvider.startWebView` calls `createHttpServer({embedded:false, quiet, hostOwned, configNamespace:'vscode'})` against the window's OWN store/runtime/multiplayer (not `PixelAgentsServer`: a second window reuses the first one's embedded server, which is another office), loopback, own random token, NOT in the discovery registry, no hook callback — copies `http://127.0.0.1:<port>/?token=` and offers `openExternal`. `hostOwned` = the handshake restores no agents and asks no hooks consent, and hooks toggles only answer `hooksStatus` (VS Code owns hooks). `onPagesChanged` counts tokened pages from `webviewReady` to close; while ≥1, the adapter DROPS its own panel's `presenceUpdate`/`updateMeetingPresence`/`sendMeetingSignal`/`sendMeetingEvent` (two pages would publish contradicting poses and answer the same WebRTC offers) and sends `officeInBrowser {open}` — the panel pauses presence, leaves its call, disables avatar keys and shows a notice.
 - Relay/office compatibility: an OLD relay strips `meeting` from state frames and drops `signal`/`meet` frames, so meetings need the relay updated too.
+
+### Games (Pixel Frag)
+
+Vocabulary: **Match**, **Bot** in CONTEXT.md; user docs in `docs/multiplayer.md#games`. The **Games** button is always there: a solo match needs no room.
+
+- **A match is a set of presences, like a meeting.** Each office publishes `GamePresence` (`id`, `title`, `since`, `cfg: FpsConfig`, palette/hueShift) on its state frame; `roomMatches()` groups by id and the player with the earliest `since` (then peerId) is the **host** — every office computes the same, nobody is asked. Heartbeat `FPS_PRESENCE_HEARTBEAT_MS` / TTL `GAME_PRESENCE_TTL_MS`, exactly as meetings. `play` frames go to the OTHER peers whose last state names the sender's match (never back: the sender applied its own frame); 80/s per peer, ≤64 KB (an office map). `sendGameFrame` calls `flushPublish()` first so the relay knows the match before the first frame. Privileged-only in standalone; the VS Code panel drops them while a web view page is open (that page plays) and leaves its room match on `officeInBrowser`.
+- **Authority is split, no server simulation**: each office owns its player (`pos` ~15/s), resolves its own hitscan shots against what IT sees (favor the shooter) and sends `hit {to, dmg, w}` to the target; the TARGET owns its health and announces `die {by, w}`. The host runs the bots (`bots` 10/s; a bot's hit on a player carries `by: botId`), counts frags from `die` frames, owns the round clock (`score {score, round, endsAt, over, restartAt, items}`, on change + every 2 s, shared relay clock) and item respawns (`take {i}` from the others, optimistic locally with a grace window). A newcomer sends `req`; the host answers with `score`, `bots` and — for the office map only — `map` (built-in maps are rebuilt locally, seeded). Host leaves → the next player's `setParticipants` flips it to host: `takeOver()` turns the bot views into simulated bots and keeps the round going.
+- **Rendering** is a classic raycaster (`render.ts`) into ~`FPS_RENDER_HEIGHT` px tall (width by aspect, 240-480), scaled up pixelated; the HUD is canvas at screen resolution in the pixel font. Cells: `A-Z` walls, `a-z` floors, `0-9` **waist-high blocks** (desks, crates: `h < FPS_EYE_HEIGHT`, shot over, walked around) drawn per column as front face + top, with a per-column occluder list so sprites behind a block are cut below its far top edge. Other players and bots use the office character sheets (`getCharacterSprites`, the person's look included) with the frame for the side they show you (DOWN when facing you, UP away, LEFT/RIGHT by the sign of the relative angle — the map's y grows downward); dead = the front frame rotated flat.
+- **Office map** (`officeMap(os)`): the VIEWED level's rect plus a wall ring; WALL → tinted `office` texture, VOID → `void` wall, floors keep their pattern + color (`{pat, color}` → `getColorizedFloorSprite`), desks (`isDesk` / category `desks`) → blocks colored from the tabletop, surface items → props at `z = FPS_BLOCK_HEIGHT` when on a desk, chairs → non-solid props, other blocking furniture → solid props (squashed: office art shows its top); wall items and doors are skipped. Spawns and items are spread (farthest-point) over the largest connected open area, so a shut room never gets one.
+- **Balance knobs**: `WEAPONS` (pistol/shotgun/chaingun), `DIFFICULTY` (reaction, turn speed, aim error, sight/FOV, speed, burst/pause), `FPS_SPAWN_GUARD_SEC` (no damage and no bot targeting right after spawning — without it bots spawn-killed within a second).
+- Tests: `webview-ui/test/fpsSim.test.ts` (maps closed + connected, collision, rays, shots, bots score in a solo match, round restart, two sessions over a fake relay: hits, frags, host migration, map transfer, office map conversion), `webview-ui/test/gamesModel.test.ts`, `server/__tests__/games.test.ts` (sanitizers, relay routing, privileged gate).
 
 ### ClientMessageHandler
 

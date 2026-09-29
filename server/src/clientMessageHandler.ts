@@ -373,6 +373,17 @@ export function handleClientMessage(
       else ctx.multiplayer?.sendMeetingEvent(msg.event);
       break;
 
+    // Games: playing in a match is the operator's character, as in the room — same gate.
+    case 'updateGamePresence':
+    case 'sendGameFrame':
+      if (!ctx.privileged) {
+        console.warn(`[Pixel Agents] Ignoring ${msg.type} from an untokened client.`);
+        break;
+      }
+      if (msg.type === 'updateGamePresence') ctx.multiplayer?.setGame(msg.game);
+      else ctx.multiplayer?.sendGameFrame(msg.frame);
+      break;
+
     case 'openExternal':
       // The standalone page opens links in the browser itself; nothing to do here.
       break;

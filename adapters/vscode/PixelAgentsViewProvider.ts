@@ -559,10 +559,12 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         (message.type === 'presenceUpdate' ||
           message.type === 'updateMeetingPresence' ||
           message.type === 'sendMeetingSignal' ||
-          message.type === 'sendMeetingEvent')
+          message.type === 'sendMeetingEvent' ||
+          message.type === 'updateGamePresence' ||
+          message.type === 'sendGameFrame')
       ) {
         // The office is open in a browser page: that page places the person's
-        // character and holds their meeting. Two pages would contradict each other.
+        // character and holds their meeting and match. Two pages would contradict each other.
         return;
       } else if (message.type === 'presenceUpdate') {
         this.multiplayer?.setPresence(message.characters, message.desk);
@@ -576,6 +578,10 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         this.multiplayer?.sendMeetingSignal(message.to, message.data);
       } else if (message.type === 'sendMeetingEvent') {
         this.multiplayer?.sendMeetingEvent(message.event);
+      } else if (message.type === 'updateGamePresence') {
+        this.multiplayer?.setGame(message.game);
+      } else if (message.type === 'sendGameFrame') {
+        this.multiplayer?.sendGameFrame(message.frame);
       } else if (
         message.type === 'configureCalendar' ||
         message.type === 'spotifyCommand' ||

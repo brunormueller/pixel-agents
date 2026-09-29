@@ -362,6 +362,29 @@ Algumas coisas para saber:
 
 > **Quem roda o relay:** editar em grupo precisa do relay novo. Com um relay antigo, só quem criou a sala edita, e o mapa some quando a sala esvazia. O relay novo guarda o mapa de cada sala em `~/.pixel-agents/relay-rooms/` (um arquivo por sala, com o nome embaralhado). Para começar uma sala do zero, apague o arquivo dela, ou rode o relay com `--no-save-rooms` para não guardar nada.
 
+### 23. Jogue Pixel Frag (tiro em primeira pessoa)
+
+O botão **Games** (na barra de baixo) abre os jogos. O primeiro é o **Pixel Frag**, um jogo de tiro em primeira pessoa, todo em pixel.
+
+1. Clique em **Games** e escolha:
+   - **Map**: **Your office** (o andar que está na tela: as paredes ficam de pé, as mesas viram blocos na altura da cintura e os móveis ficam no lugar), **Arena**, **Maze** (labirinto) ou **Warehouse** (depósito com caixas).
+   - **Bots**: de 0 a 8 jogadores do computador, em **Easy**, **Normal** ou **Hard**.
+   - **Frag limit** (quantas mortes ganham a rodada) e **Time limit** (tempo da rodada).
+2. **Play solo**: só você e os bots. Não precisa estar numa sala.
+3. **Host in the room**: cria uma partida que todo mundo da sala vê no próprio **Games**, com o botão **Join**. Quem está jogando aparece com 🎮 do lado do nome.
+
+Controles: clique no jogo para prender o mouse (**Esc** solta e abre o menu). **WASD** ou as setas andam, o mouse mira (ou **Q E**), clique ou **Espaço** atira, **Shift** corre, **1 2 3** ou a rodinha trocam a arma (pistola, escopeta, metralhadora), **Tab** mostra o placar, **M** o minimapa. Kits de saúde e munição ficam espalhados e voltam 20 s depois de pegos. No menu (**Esc**) dá para ajustar a sensibilidade do mouse, o campo de visão e o volume.
+
+Cada um aparece com o próprio boneco. Quem entrou primeiro na partida é o "dono" (roda os bots e o placar); se ele sair, o próximo assume e a rodada continua.
+
+Para testar, combine com outra pessoa:
+
+- Um clica em **Host in the room** com **Your office**; o outro clica em **Join**. Os dois devem estar no mesmo escritório, se vendo e vendo os bots.
+- Atirem um no outro: o placar (**Tab**) tem que mostrar o mesmo resultado para os dois.
+- Quem criou a partida sai (**Esc** → **Leave the match**): o outro continua jogando com os bots.
+
+> **Quem roda o relay:** as partidas também precisam do relay novo. Com um relay antigo, a partida não aparece para os outros (o **Play solo** funciona sempre).
+
 ---
 
 ## O que é compartilhado com os outros
@@ -378,6 +401,7 @@ Do seu escritório, só sai isto:
 - o visual que você escolheu para o boneco, o seu status com a mensagem, e a decoração da sua mesa;
 - só se você marcar **Show the room what I am listening to**: o nome da música e do artista que estão tocando;
 - nas reuniões: o título da reunião, se o seu microfone e a sua câmera estão ligados, se você está compartilhando tela, gravando ou com a mão levantada, e o que você escreve no chat da reunião, as suas reações, as frases transcritas da sua voz (só se você aceitou) e as notas que o seu Claude escrever. **O vídeo, o áudio e as telas vão direto de navegador para navegador**, criptografados: não passam pelo relay.
+- nas partidas do **Pixel Frag**, só para quem está na mesma partida: onde o seu jogador está e para onde olha, a vida, a arma, os tiros, em quem você acertou e quando morreu. Quem é dono da partida manda também os bots, o placar e, no mapa **Your office**, o desenho do andar (o mesmo mapa que a sala já tem).
 
 **Nunca saem** nomes de arquivos, comandos, código, prompts, conversas, o nome das pastas, as suas reuniões, o endereço do seu calendário ou o login do Spotify. Tudo isso fica no seu computador. O máximo que o calendário mostra para a sala é o status **In a meeting**.
 

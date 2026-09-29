@@ -220,6 +220,32 @@ export const MEETING_NOTES_DIR = 'meetings';
  *  stays quiet, so that session never shows up as an agent in the office. */
 export const PIXEL_AGENTS_SKIP_HOOK_ENV = 'PIXEL_AGENTS_SKIP_HOOK';
 
+// ── Games (Pixel Frag matches inside a room) ─────────────────
+/** A `play` frame is a few dozen bytes, except the office map a host sends a newcomer. */
+export const MULTIPLAYER_MAX_PLAY_FRAME_BYTES = 64 * 1024;
+/** Relay: match frames per peer per window. A player sends ~15 positions a second
+ *  plus its hits; a host adds ~10 bot updates. Extras are dropped. */
+export const MULTIPLAYER_MAX_PLAY_FRAMES_PER_WINDOW = 80;
+export const MULTIPLAYER_PLAY_WINDOW_MS = 1_000;
+/** The webview re-sends its match presence every 5 s; three misses and it left the match (a closed tab). */
+export const GAME_PRESENCE_TTL_MS = 16_000;
+export const GAME_MAX_ID_LENGTH = 64;
+export const GAME_MAX_TITLE_LENGTH = 60;
+/** Pixel Frag bounds, relay and peers alike (mirror webview-ui/src/constants.ts FPS_*). */
+export const FPS_MAX_BOTS = 8;
+export const FPS_MAX_FRAG_LIMIT = 100;
+export const FPS_MAX_TIME_LIMIT_MIN = 60;
+/** An office floor (at most 64 tiles a side) plus the wall put round it. */
+export const FPS_MAX_MAP_DIM = 66;
+export const FPS_MAX_MAP_SURFACES = 26;
+export const FPS_MAX_MAP_BLOCKS = 10;
+export const FPS_MAX_MAP_PROPS = 400;
+export const FPS_MAX_MAP_SPAWNS = 32;
+export const FPS_MAX_MAP_ITEMS = 32;
+export const FPS_MAX_BLOCK_HEIGHT = 0.45;
+export const FPS_MAX_HP = 200;
+export const FPS_MAX_WEAPON_SLOT = 8;
+
 // ── Calendar integration ─────────────────────────────────────
 /** Secret iCal feed URLs live here, mode 0600 (a feed URL is a read credential). */
 export const CALENDAR_FILE_NAME = 'calendar.json';

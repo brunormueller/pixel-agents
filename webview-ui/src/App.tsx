@@ -18,6 +18,8 @@ import { DebugView } from './components/DebugView.js';
 import { DecorPanel } from './components/DecorPanel.js';
 import { EditActionBar } from './components/EditActionBar.js';
 import { ElevatorPicker } from './components/ElevatorPicker.js';
+import { FpsGame } from './components/games/FpsGame.js';
+import { GamesPanel } from './components/games/GamesPanel.js';
 import { IntroBubble } from './components/IntroBubble.js';
 import { JoinScreen } from './components/JoinScreen.js';
 import { LevelSwitcher } from './components/LevelSwitcher.js';
@@ -35,6 +37,7 @@ import { Modal } from './components/ui/Modal.js';
 import { VersionIndicator } from './components/VersionIndicator.js';
 import { ZoomControls } from './components/ZoomControls.js';
 import { DECOR_MAX_ITEMS } from './constants.js';
+import { useGames } from './games/useGames.js';
 import { useAvatarKeyboard } from './hooks/useAvatarKeyboard.js';
 import { useEditorActions } from './hooks/useEditorActions.js';
 import { useEditorKeyboard } from './hooks/useEditorKeyboard.js';
@@ -308,9 +311,14 @@ function App() {
 
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // ── Games (Pixel Frag: solo against bots, or a match in the room) ──
+  const games = useGames(getOfficeState, multiplayer?.name ?? '');
+  const inGame = games.session !== null;
+
   const [editorTickForKeyboard, setEditorTickForKeyboard] = useState(0);
   useEditorKeyboard(
-    editor.isEditMode,
+    // The game takes the keyboard while it is open.
+    editor.isEditMode && !inGame,
     editorState,
     editor.handleDeleteSelected,
     editor.handleRotateSelected,
@@ -341,7 +349,7 @@ function App() {
   const meeting = useMeeting(getOfficeState, multiplayer?.name ?? '');
   const [meetingStageOpen, setMeetingStageOpen] = useState(false);
   const inCall = meeting.current !== null;
-  /** Who is in a call, per character: 'self' or the office's peerId. */
+  /** Who is in a call or a match, per character: 'self' or the office's peerId. */
   const meetingBadges = useMemo(() => {
     const out: Record<string, string> = {};
     for (const mt of meeting.meetings) {
@@ -350,8 +358,14 @@ function App() {
         out[p.self ? 'self' : p.peerId] = `${extra}📞`;
       }
     }
+    for (const match of games.matches) {
+      for (const p of match.players) {
+        const key = p.self ? 'self' : p.peerId;
+        out[key] = `${out[key] ?? ''}🎮`;
+      }
+    }
     return out;
-  }, [meeting.meetings]);
+  }, [meeting.meetings, games.matches]);
   /** People in the room who are not in our call (the Invite list). */
   const currentMeeting = meeting.current;
   const invitable = useMemo(() => {
@@ -410,6 +424,12 @@ function App() {
   useEffect(() => {
     if (officeInBrowser && inCall) leaveMeeting();
   }, [officeInBrowser, inCall, leaveMeeting]);
+  // The same for a match in the room: the browser page plays it.
+  const leaveGame = games.leave;
+  const inRoomMatch = games.playing?.mode === 'room';
+  useEffect(() => {
+    if (officeInBrowser && inRoomMatch) leaveGame();
+  }, [officeInBrowser, inRoomMatch, leaveGame]);
   useAvatarKeyboard(
     getOfficeState,
     joined &&
@@ -417,6 +437,7 @@ function App() {
       !editor.isEditMode &&
       !isDeskPicking &&
       !isAvatarEditorOpen &&
+      !inGame &&
       !(inCall && meetingStageOpen),
     useCallback(() => setAvatarBusyHint(true), []),
   );
@@ -967,6 +988,7 @@ function App() {
         inMeeting={(calendar?.inMeeting === true && calendar.autoStatus) || inCall}
         onStatusChange={saveStatus}
         musicPlaying={spotify?.nowPlaying?.isPlaying === true}
+        gameCount={games.matches.length}
         chatUnread={chatUnread}
         inCall={inCall}
         meetingCount={meeting.meetings.length}
@@ -1063,6 +1085,10 @@ function App() {
         />
       )}
 
+      {sidePanel === 'games' && (
+        <GamesPanel g={games} inRoom={joined} onClose={() => setSidePanel(null)} />
+      )}
+
       {sidePanel === 'calendar' && (
         <CalendarPanel
           calendar={calendar}
@@ -1096,6 +1122,16 @@ function App() {
           onSave={saveLook}
           onReset={() => saveLook(null)}
           onClose={() => setIsAvatarEditorOpen(false)}
+        />
+      )}
+
+      {games.session && games.playing && (
+        <FpsGame
+          key={games.playing.matchId ?? 'solo'}
+          session={games.session}
+          title={games.playing.title}
+          solo={games.playing.mode === 'solo'}
+          onLeave={games.leave}
         />
       )}
 
@@ -1175,7 +1211,8 @@ function App() {
             isChangelogOpen ||
             isHooksInfoOpen ||
             showMigrationNotice ||
-            editor.isEditMode
+            editor.isEditMode ||
+            inGame
           }
         />
       )}

@@ -4,6 +4,7 @@ import { WebSocket } from 'ws';
 import type { PresenceCharacter } from '../../../core/src/messages.js';
 import type { AgentStateStore } from '../agentStateStore.js';
 import {
+  GAME_PRESENCE_TTL_MS,
   MEETING_PRESENCE_TTL_MS,
   MULTIPLAYER_CHAT_HISTORY_LIMIT,
   MULTIPLAYER_LAYOUT_MIN_INTERVAL_MS,
@@ -17,9 +18,11 @@ import {
   MULTIPLAYER_RECONNECT_MAX_MS,
   MULTIPLAYER_RECONNECT_MIN_MS,
 } from '../constants.js';
+import { sanitizeGameFrame, sanitizeGamePresence } from './gameProtocol.js';
 import type {
   AvatarLook,
   DeskDecorItem,
+  GamePresence,
   IceServer,
   LayoutRejectReason,
   MeetingPresence,
@@ -167,6 +170,10 @@ type WsSend = (message: Record<string, unknown>) => void;
  * It also carries the room's chat: `sendChat` forwards what the person typed,
  * and every message the relay fans out (ours included) lands in an in-memory
  * history that a reloaded webview gets back. Nothing is written to disk.
+ *
+ * Meetings and games ride along the same way: the webview reports the person's
+ * place in a call or a match (`setMeeting`, `setGame`), and the frames it sends
+ * for them reach only that call's or that match's other offices.
  */
 export class MultiplayerClient {
   private readonly local = new Map<number, LocalAgentActivity>();
@@ -182,6 +189,9 @@ export class MultiplayerClient {
   /** The person's place in a meeting (a call inside the room), as the webview last reported it. */
   private meeting: MeetingPresence | null = null;
   private meetingExpiry: ReturnType<typeof setTimeout> | null = null;
+  /** The match (a game inside the room) the person plays, as the webview last reported it. */
+  private game: GamePresence | null = null;
+  private gameExpiry: ReturnType<typeof setTimeout> | null = null;
   /** STUN/TURN servers the relay handed out at welcome. */
   private relayIceServers: IceServer[] = [];
   /** Relay clock minus ours, estimated at welcome (ms). */
@@ -295,6 +305,7 @@ export class MultiplayerClient {
     if (!this.joined) return;
     this.joined = false;
     this.clearMeeting();
+    this.clearGame();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     const socket = this.socket;
@@ -467,6 +478,45 @@ export class MultiplayerClient {
     return true;
   }
 
+  /**
+   * Join, update or leave (null) a match in the room. Like a meeting presence:
+   * the webview re-sends it every few seconds while playing, and one nobody
+   * refreshes expires (a closed tab leaves the match).
+   */
+  setGame(raw: unknown): void {
+    if (this.disposed) return;
+    const next = raw === null ? null : (sanitizeGamePresence(raw) ?? null);
+    if (this.gameExpiry) clearTimeout(this.gameExpiry);
+    this.gameExpiry = null;
+    if (next) {
+      this.gameExpiry = setTimeout(() => {
+        this.gameExpiry = null;
+        console.log('[Pixel Agents] Multiplayer: match presence expired (page closed?)');
+        this.game = null;
+        this.schedulePublish();
+      }, GAME_PRESENCE_TTL_MS);
+    }
+    if (JSON.stringify(next) === JSON.stringify(this.game)) return;
+    this.game = next;
+    this.schedulePublish();
+  }
+
+  /** The match this office plays, as published. Exposed for tests. */
+  currentGame(): GamePresence | null {
+    return this.game;
+  }
+
+  /** A frame for the other players of the current match. False when it could not be sent. */
+  sendGameFrame(raw: unknown): boolean {
+    const frame = sanitizeGameFrame(raw);
+    const socket = this.socket;
+    if (!frame || !this.game || !socket || socket.readyState !== WebSocket.OPEN) return false;
+    if (!this.selfPeerId) return false;
+    this.flushPublish(); // the relay routes by the match in our last state frame
+    socket.send(JSON.stringify({ t: 'play', ev: frame }));
+    return true;
+  }
+
   /** The profile as the room sees it. Exposed for tests. */
   publishedProfile(): PeerProfile {
     const p = this.profile;
@@ -559,6 +609,7 @@ export class MultiplayerClient {
     this.joined = false;
     this.unsubscribe();
     this.clearMeeting();
+    this.clearGame();
     if (this.publishTimer) clearTimeout(this.publishTimer);
     if (this.layoutTimer) clearTimeout(this.layoutTimer);
     if (this.editTimer) clearTimeout(this.editTimer);
@@ -647,6 +698,12 @@ export class MultiplayerClient {
     this.meeting = null;
   }
 
+  private clearGame(): void {
+    if (this.gameExpiry) clearTimeout(this.gameExpiry);
+    this.gameExpiry = null;
+    this.game = null;
+  }
+
   private publish(force = false): void {
     const socket = this.socket;
     if (!socket || socket.readyState !== WebSocket.OPEN || !this.selfPeerId) return;
@@ -656,6 +713,7 @@ export class MultiplayerClient {
       desk: this.desk,
       profile: this.publishedProfile(),
       ...(this.meeting ? { meeting: this.meeting } : {}),
+      ...(this.game ? { game: this.game } : {}),
     });
     if (!force && frame === this.lastPublished) return;
     this.lastPublished = frame;
@@ -808,6 +866,15 @@ export class MultiplayerClient {
             this.store.broadcast({ type: 'meetingSignal', from: frame.from, data: frame.data });
           }
           break;
+        case 'play':
+          if (frame.gameId !== this.game?.id) break; // a match we already left
+          this.store.broadcast({
+            type: 'gameFrame',
+            from: frame.from,
+            gameId: frame.gameId,
+            frame: frame.ev,
+          });
+          break;
         case 'meet':
           if (frame.meetingId !== this.meeting?.id) break; // a call we already left
           this.store.broadcast({
@@ -917,6 +984,7 @@ export class MultiplayerClient {
         since: p.since,
         ...(p.profile ? { profile: p.profile } : {}),
         ...(p.meeting ? { meeting: p.meeting } : {}),
+        ...(p.game ? { game: p.game } : {}),
       })),
     };
   }

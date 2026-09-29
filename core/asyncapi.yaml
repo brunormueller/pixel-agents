@@ -112,6 +112,8 @@ components:
         - $ref: '#/components/schemas/MeetingSignal'
         - $ref: '#/components/schemas/MeetingEvent'
         - $ref: '#/components/schemas/MeetingNotesResult'
+        # Games (a match played inside the room)
+        - $ref: '#/components/schemas/GameFrame'
         # Integrations (calendar, music)
         - $ref: '#/components/schemas/CalendarState'
         - $ref: '#/components/schemas/SpotifyStatus'
@@ -176,6 +178,8 @@ components:
         - $ref: '#/components/schemas/SendMeetingSignal'
         - $ref: '#/components/schemas/SendMeetingEvent'
         - $ref: '#/components/schemas/GenerateMeetingNotes'
+        - $ref: '#/components/schemas/UpdateGamePresence'
+        - $ref: '#/components/schemas/SendGameFrame'
       discriminator: type
 
     # ── Server message variants ────────────────────────────────────
@@ -526,6 +530,8 @@ components:
           $ref: '#/components/schemas/PeerProfile'
         meeting:
           $ref: '#/components/schemas/MeetingPresence'
+        game:
+          $ref: '#/components/schemas/GamePresence'
 
     PeerProfile:
       description: |
@@ -1155,6 +1161,366 @@ components:
           type: string
         error:
           type: string
+
+    # ── Games (Pixel Frag, a first-person match inside the room) ──
+
+    GameKind:
+      description: Which game a match plays. Pixel Frag (`fps`) is the first.
+      type: string
+      enum: [fps]
+
+    FpsDifficulty:
+      type: string
+      enum: [easy, normal, hard]
+
+    FpsConfig:
+      description: |
+        How a Pixel Frag match plays, chosen by whoever started it and copied by
+        everyone who joins (so it outlives its starter).
+      type: object
+      additionalProperties: false
+      required: [map, bots, difficulty, fragLimit, timeLimit]
+      properties:
+        map:
+          type: string
+          description: |
+            A built-in map id, or `office`: the starter's floor, sent to the others
+            as a `map` frame by the match's host.
+        bots:
+          type: integer
+          description: Computer-controlled players (0-8), run by the match's host.
+        difficulty:
+          $ref: '#/components/schemas/FpsDifficulty'
+        fragLimit:
+          type: integer
+          description: Frags that win a round; 0 = no limit.
+        timeLimit:
+          type: integer
+          description: Minutes per round; 0 = no limit.
+
+    GamePresence:
+      description: |
+        This office's person in a match — a game played inside the room. Like a
+        meeting, a match is every office publishing the same `id`; the one that
+        joined earliest (`since`, then peerId) is its host: it runs the bots,
+        keeps the score and sends the office map. Re-sent every few seconds; the
+        server drops a presence nobody refreshes.
+      type: object
+      additionalProperties: false
+      required: [id, game, title, since, cfg, palette, hueShift]
+      properties:
+        id:
+          type: string
+          description: Match id (letters, digits, - and _; at most 64).
+        game:
+          $ref: '#/components/schemas/GameKind'
+        title:
+          type: string
+          description: At most 60 characters.
+        since:
+          type: integer
+          description: Relay clock when this person joined the match.
+        cfg:
+          $ref: '#/components/schemas/FpsConfig'
+        palette:
+          type: integer
+          description: Character palette this person plays with.
+        hueShift:
+          type: integer
+
+    GameFrameKind:
+      description: |
+        `pos` a player's own state (about 15 a second), `hit` damage one shooter
+        dealt one target, `die` a death (the victim's word, or the host's for a
+        bot), `bots` + `score` the host's picture of the bots and the round,
+        `map` the office map, `req` a newcomer asking for map and score, `take`
+        a pickup taken.
+      type: string
+      enum: [pos, hit, die, bots, score, map, req, take]
+
+    FpsBotState:
+      type: object
+      additionalProperties: false
+      required: [id, n, x, y, a, hp, alive, w, shot, mv, p, h]
+      properties:
+        id:
+          type: string
+        n:
+          type: string
+          description: Name.
+        x:
+          type: number
+        y:
+          type: number
+        a:
+          type: number
+          description: Facing, radians.
+        hp:
+          type: integer
+        alive:
+          type: boolean
+        w:
+          type: integer
+          description: Weapon slot.
+        shot:
+          type: integer
+          description: Shots fired so far (a new value = a muzzle flash).
+        mv:
+          type: boolean
+          description: Walking.
+        p:
+          type: integer
+          description: Palette.
+        h:
+          type: integer
+          description: Hue shift.
+
+    FpsScoreEntry:
+      type: object
+      additionalProperties: false
+      required: [id, n, f, d]
+      properties:
+        id:
+          type: string
+          description: A player's peerId, or a bot id.
+        n:
+          type: string
+        f:
+          type: integer
+          description: Frags.
+        d:
+          type: integer
+          description: Deaths.
+        bot:
+          type: boolean
+
+    FpsColorAdjust:
+      description: A floor tile's colorization, as the layout stores it.
+      type: object
+      additionalProperties: false
+      required: [h, s, b, c]
+      properties:
+        h:
+          type: number
+        s:
+          type: number
+        b:
+          type: number
+        c:
+          type: number
+        colorize:
+          type: boolean
+
+    FpsSurface:
+      description: |
+        A wall or floor texture: a built-in one (`tex`, optionally tinted with
+        `tint` = 0xRRGGBB), or an office floor tile (`pat` pattern + `color`).
+      type: object
+      additionalProperties: false
+      properties:
+        tex:
+          type: string
+        tint:
+          type: integer
+        pat:
+          type: integer
+        color:
+          $ref: '#/components/schemas/FpsColorAdjust'
+
+    FpsBlock:
+      description: A waist-high solid block (a desk, a crate) — shot over, walked around.
+      type: object
+      additionalProperties: false
+      required: [h, top, side]
+      properties:
+        h:
+          type: number
+          description: Height, wall = 1 (at most 0.45, under the eye).
+        top:
+          type: integer
+          description: 0xRRGGBB of the top.
+        side:
+          type: integer
+          description: 0xRRGGBB of the sides.
+
+    FpsProp:
+      description: Something standing in the map, drawn as a sprite (furniture type or built-in prop id).
+      type: object
+      additionalProperties: false
+      required: [x, y, t]
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+        t:
+          type: string
+        z:
+          type: number
+          description: Height it stands at (on a desk).
+
+    FpsPoint:
+      type: object
+      additionalProperties: false
+      required: [x, y]
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+
+    FpsItemKind:
+      type: string
+      enum: [health, shells, bullets]
+
+    FpsItem:
+      type: object
+      additionalProperties: false
+      required: [x, y, k]
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+        k:
+          $ref: '#/components/schemas/FpsItemKind'
+
+    FpsMapData:
+      description: |
+        A Pixel Frag map. `cells` has one character per cell, row by row:
+        `A`-`Z` a wall (texture `walls[n]`), `a`-`z` floor (`floors[n]`),
+        `0`-`9` a waist-high block (`blocks[n]`). `solid` lists the floor cells
+        furniture stands on (not walkable). Positions are in cells.
+      type: object
+      additionalProperties: false
+      required:
+        [name, cols, rows, cells, walls, floors, blocks, props, solid, spawns, items, ceiling, fog]
+      properties:
+        name:
+          type: string
+        cols:
+          type: integer
+        rows:
+          type: integer
+        cells:
+          type: string
+        walls:
+          type: array
+          items:
+            $ref: '#/components/schemas/FpsSurface'
+        floors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FpsSurface'
+        blocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/FpsBlock'
+        props:
+          type: array
+          items:
+            $ref: '#/components/schemas/FpsProp'
+        solid:
+          type: array
+          items:
+            type: integer
+        spawns:
+          type: array
+          items:
+            $ref: '#/components/schemas/FpsPoint'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FpsItem'
+        ceiling:
+          type: integer
+          description: 0xRRGGBB.
+        fog:
+          type: integer
+          description: 0xRRGGBB things fade into with distance.
+
+    GameFrameBody:
+      description: |
+        One frame of a match, relayed to the other players of the same match
+        only (never the sender). Which fields a frame carries depends on `k`;
+        both the relay and every office drop the rest.
+      type: object
+      additionalProperties: false
+      required: [k]
+      properties:
+        k:
+          $ref: '#/components/schemas/GameFrameKind'
+        x:
+          type: number
+        y:
+          type: number
+        a:
+          type: number
+        hp:
+          type: integer
+        alive:
+          type: boolean
+        w:
+          type: integer
+        shot:
+          type: integer
+        mv:
+          type: boolean
+        to:
+          type: string
+          description: hit — the target (a peerId or a bot id).
+        dmg:
+          type: integer
+        who:
+          type: string
+          description: die — the bot that died (absent = the sender died).
+        by:
+          type: string
+          description: |
+            die — who scored the frag ('' = nobody); hit — the bot that fired
+            (absent = the sender did).
+        bots:
+          type: array
+          items:
+            $ref: '#/components/schemas/FpsBotState'
+        score:
+          type: array
+          items:
+            $ref: '#/components/schemas/FpsScoreEntry'
+        round:
+          type: integer
+        endsAt:
+          type: integer
+          description: Relay clock the round ends at; 0 = no time limit.
+        over:
+          type: boolean
+        restartAt:
+          type: integer
+          description: Relay clock the next round starts at (while `over`).
+        items:
+          type: string
+          description: score — one character per map item, `1` = there to take.
+        i:
+          type: integer
+          description: take — the item index.
+        map:
+          $ref: '#/components/schemas/FpsMapData'
+
+    GameFrame:
+      description: A frame of this office's match from another player, relayed to this office only.
+      type: object
+      additionalProperties: false
+      required: [type, from, gameId, frame]
+      properties:
+        type:
+          const: gameFrame
+        from:
+          type: string
+          description: Sender's peerId.
+        gameId:
+          type: string
+        frame:
+          $ref: '#/components/schemas/GameFrameBody'
 
     CalendarEvent:
       description: |
@@ -2017,6 +2383,33 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/MeetingLine'
+
+    UpdateGamePresence:
+      description: |
+        Join, update or leave (null) a match in the room. Re-sent every few
+        seconds while playing: the server drops a presence nobody refreshes.
+        Privileged-only in standalone.
+      type: object
+      additionalProperties: false
+      required: [type, game]
+      properties:
+        type:
+          const: updateGamePresence
+        game:
+          oneOf:
+            - $ref: '#/components/schemas/GamePresence'
+            - type: 'null'
+
+    SendGameFrame:
+      description: A frame for the other players of this office's match. Privileged-only in standalone.
+      type: object
+      additionalProperties: false
+      required: [type, frame]
+      properties:
+        type:
+          const: sendGameFrame
+        frame:
+          $ref: '#/components/schemas/GameFrameBody'
 
     SetAlwaysShowLabels:
       type: object

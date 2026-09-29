@@ -35,6 +35,7 @@ export type ServerMessage =
   | MeetingSignal
   | MeetingEvent
   | MeetingNotesResult
+  | GameFrame
   | CalendarState
   | SpotifyStatus
   | OpenExternalUrl
@@ -90,7 +91,9 @@ export type ClientMessage =
   | UpdateMeetingPresence
   | SendMeetingSignal
   | SendMeetingEvent
-  | GenerateMeetingNotes;
+  | GenerateMeetingNotes
+  | UpdateGamePresence
+  | SendGameFrame;
 
 export interface ProviderCapabilities {
   type: 'providerCapabilities';
@@ -229,6 +232,7 @@ export interface RemotePeer {
   since?: number;
   profile?: PeerProfile;
   meeting?: MeetingPresence;
+  game?: GamePresence;
 }
 
 export interface RemoteAgent {
@@ -337,6 +341,28 @@ export interface MeetingMusic {
   track: string;
   at: number;
 }
+
+export interface GamePresence {
+  id: string;
+  game: GameKind;
+  title: string;
+  since: number;
+  cfg: FpsConfig;
+  palette: number;
+  hueShift: number;
+}
+
+export type GameKind = 'fps';
+
+export interface FpsConfig {
+  map: string;
+  bots: number;
+  difficulty: FpsDifficulty;
+  fragLimit: number;
+  timeLimit: number;
+}
+
+export type FpsDifficulty = 'easy' | 'normal' | 'hard';
 
 export interface ChatMessage {
   type: 'chatMessage';
@@ -464,6 +490,120 @@ export interface MeetingNotesResult {
   savedTo?: string;
   error?: string;
 }
+
+export interface GameFrame {
+  type: 'gameFrame';
+  from: string;
+  gameId: string;
+  frame: GameFrameBody;
+}
+
+export interface GameFrameBody {
+  k: GameFrameKind;
+  x?: number;
+  y?: number;
+  a?: number;
+  hp?: number;
+  alive?: boolean;
+  w?: number;
+  shot?: number;
+  mv?: boolean;
+  to?: string;
+  dmg?: number;
+  who?: string;
+  by?: string;
+  bots?: FpsBotState[];
+  score?: FpsScoreEntry[];
+  round?: number;
+  endsAt?: number;
+  over?: boolean;
+  restartAt?: number;
+  items?: string;
+  i?: number;
+  map?: FpsMapData;
+}
+
+export type GameFrameKind = 'pos' | 'hit' | 'die' | 'bots' | 'score' | 'map' | 'req' | 'take';
+
+export interface FpsBotState {
+  id: string;
+  n: string;
+  x: number;
+  y: number;
+  a: number;
+  hp: number;
+  alive: boolean;
+  w: number;
+  shot: number;
+  mv: boolean;
+  p: number;
+  h: number;
+}
+
+export interface FpsScoreEntry {
+  id: string;
+  n: string;
+  f: number;
+  d: number;
+  bot?: boolean;
+}
+
+export interface FpsMapData {
+  name: string;
+  cols: number;
+  rows: number;
+  cells: string;
+  walls: FpsSurface[];
+  floors: FpsSurface[];
+  blocks: FpsBlock[];
+  props: FpsProp[];
+  solid: number[];
+  spawns: FpsPoint[];
+  items: FpsItem[];
+  ceiling: number;
+  fog: number;
+}
+
+export interface FpsSurface {
+  tex?: string;
+  tint?: number;
+  pat?: number;
+  color?: FpsColorAdjust;
+}
+
+export interface FpsColorAdjust {
+  h: number;
+  s: number;
+  b: number;
+  c: number;
+  colorize?: boolean;
+}
+
+export interface FpsBlock {
+  h: number;
+  top: number;
+  side: number;
+}
+
+export interface FpsProp {
+  x: number;
+  y: number;
+  t: string;
+  z?: number;
+}
+
+export interface FpsPoint {
+  x: number;
+  y: number;
+}
+
+export interface FpsItem {
+  x: number;
+  y: number;
+  k: FpsItemKind;
+}
+
+export type FpsItemKind = 'health' | 'shells' | 'bullets';
 
 export interface CalendarState {
   type: 'calendarState';
@@ -866,4 +1006,14 @@ export interface MeetingLine {
   name: string;
   text: string;
   ts: number;
+}
+
+export interface UpdateGamePresence {
+  type: 'updateGamePresence';
+  game: GamePresence | null;
+}
+
+export interface SendGameFrame {
+  type: 'sendGameFrame';
+  frame: GameFrameBody;
 }
