@@ -27,6 +27,10 @@
  * reactions, captions, notes) the relay fans out to that meeting's
  * participants only. Audio and video go browser to browser, never here.
  *
+ * Games (a match played inside the room, see gameProtocol.ts) work like
+ * meetings: a `game` presence on the state frame, and `play` frames the relay
+ * sends to the other players of the sender's match only.
+ *
  * Every frame is JSON with a `t` discriminator. Both ends sanitize everything
  * they receive: the relay does not trust peers, and peers do not trust the relay.
  * Unknown frames and fields are ignored on both ends, so these additions need no
@@ -38,6 +42,8 @@ import type {
   AvatarAccessory,
   AvatarLook,
   DeskDecorItem,
+  GameFrameBody,
+  GamePresence,
   IceServer,
   MeetingEventBody,
   MeetingEventKind,
@@ -86,6 +92,7 @@ import {
   MULTIPLAYER_MAX_SWATCH_INDEX,
   MULTIPLAYER_MAX_TRACK_TEXT,
 } from '../constants.js';
+import { sanitizeGameFrame, sanitizeGameId, sanitizeGamePresence } from './gameProtocol.js';
 
 /** One agent as published to the room — the same shape the webview receives in `remotePeers`
  *  (core/asyncapi.yaml `RemoteAgent`), so the relay frames and the UI contract cannot drift. */
@@ -93,6 +100,8 @@ export type RemoteAgentState = RemoteAgent;
 export type {
   AvatarLook,
   DeskDecorItem,
+  GameFrameBody,
+  GamePresence,
   IceServer,
   MeetingEventBody,
   MeetingPresence,
@@ -119,6 +128,8 @@ export interface PeerSnapshot {
   profile?: PeerProfile;
   /** The meeting this office's person is in, if any. */
   meeting?: MeetingPresence;
+  /** The match (a game inside the room) this office's person plays, if any. */
+  game?: GamePresence;
 }
 
 // ── Frames ───────────────────────────────────────────────────
@@ -135,6 +146,7 @@ export interface StateFrame {
   desk: string | null;
   profile?: PeerProfile;
   meeting?: MeetingPresence;
+  game?: GamePresence;
 }
 export interface ChatSendFrame {
   t: 'chat';
@@ -161,8 +173,19 @@ export interface MeetSendFrame {
   t: 'meet';
   ev: MeetingEventBody;
 }
+/** A frame for the other players of the sender's current match. */
+export interface PlaySendFrame {
+  t: 'play';
+  ev: GameFrameBody;
+}
 export type ClientFrame =
-  HelloFrame | StateFrame | ChatSendFrame | LayoutSendFrame | SignalSendFrame | MeetSendFrame;
+  | HelloFrame
+  | StateFrame
+  | ChatSendFrame
+  | LayoutSendFrame
+  | SignalSendFrame
+  | MeetSendFrame
+  | PlaySendFrame;
 
 export interface WelcomeFrame {
   t: 'welcome';
@@ -235,7 +258,15 @@ export interface MeetFrame {
   ev: MeetingEventBody;
   ts: number;
 }
+/** A match frame from another player, sent to the sender's match only (never back to it). */
+export interface PlayFrame {
+  t: 'play';
+  from: string;
+  gameId: string;
+  ev: GameFrameBody;
+}
 export type RelayFrame =
+  | PlayFrame
   | WelcomeFrame
   | PeerFrame
   | LeaveFrame
@@ -805,6 +836,8 @@ function sanitizePeer(raw: unknown): PeerSnapshot | null {
   if (profile) peer.profile = profile;
   const meeting = sanitizeMeetingPresence(raw.meeting);
   if (meeting) peer.meeting = meeting;
+  const game = sanitizeGamePresence(raw.game);
+  if (game) peer.game = game;
   return peer;
 }
 
@@ -831,11 +864,17 @@ export function parseClientFrame(data: string): ClientFrame | null {
       if (profile) frame.profile = profile;
       const meeting = sanitizeMeetingPresence(raw.meeting);
       if (meeting) frame.meeting = meeting;
+      const game = sanitizeGamePresence(raw.game);
+      if (game) frame.game = game;
       return frame;
     }
     case 'chat': {
       const text = sanitizeChat(raw.text);
       return text ? { t: 'chat', text } : null;
+    }
+    case 'play': {
+      const ev = sanitizeGameFrame(raw.ev);
+      return ev ? { t: 'play', ev } : null;
     }
     case 'signal': {
       const to = sanitizeText(raw.to, MULTIPLAYER_MAX_ROOM_LENGTH);
@@ -937,6 +976,12 @@ export function parseRelayFrame(data: string): RelayFrame | null {
       const from = sanitizeText(raw.from, MULTIPLAYER_MAX_ROOM_LENGTH);
       const data = sanitizeSignal(raw.data);
       return from && data ? { t: 'signal', from, data } : null;
+    }
+    case 'play': {
+      const from = sanitizeText(raw.from, MULTIPLAYER_MAX_ROOM_LENGTH);
+      const gameId = sanitizeGameId(raw.gameId);
+      const ev = sanitizeGameFrame(raw.ev);
+      return from && gameId && ev ? { t: 'play', from, gameId, ev } : null;
     }
     case 'meet': {
       const from = sanitizeText(raw.from, MULTIPLAYER_MAX_ROOM_LENGTH);

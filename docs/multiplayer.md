@@ -44,7 +44,13 @@ Your office also sends:
   music choice, and what you say in it on purpose (its chat, your reactions, the
   sentences transcribed from your own voice if you agreed, notes you share). The
   audio, video and screens themselves go **browser to browser** and never pass
-  through the relay.
+  through the relay;
+- while you play a **match** (see [Games](#games)): the match's id, title and
+  setup (map, bots, limits), your character's palette, and — to the other players
+  of that match only — where your player stands and faces, its health, weapon and
+  shots, who you hit, and when you die. The match's host also sends its bots'
+  positions, the score and, on an office map, the map (walls, floors, desks and
+  furniture types of the floor on its screen, the same tiles the room map has).
 
 Tool names, tool arguments, file paths, shell commands, prompts, transcript
 content and workspace folder names are **never** sent. Neither are your calendar
@@ -488,6 +494,46 @@ signaling, never media.
 To see what a call is doing, run `localStorage['pixelAgents.meetingDebug'] = '1'`
 in the browser console and reload: the negotiation is logged.
 
+## Games
+
+The **Games** button (always there, in a room or not) opens the games you can
+play from the office. The first is **Pixel Frag**, a first-person shooter drawn
+in pixels.
+
+- **Play solo**: you against bots, no room needed (VS Code or standalone). The
+  game pauses while its menu is open.
+- **Host in the room**: starts a match everyone in the room can join from their
+  own Games panel (a 🎮 appears next to the players' names). The match goes on
+  while you are in the menu.
+
+| Setting    | Choices                                                                                                                                                                                                     |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Map        | **Your office** — the floor on screen: its walls stand, desks become waist-high blocks you shoot over, the rest of the furniture stands in the room — or the built-in **Arena**, **Maze** and **Warehouse** |
+| Bots       | 0 to 8 computer players, **Easy**, **Normal** or **Hard**                                                                                                                                                   |
+| Frag limit | 5, 10, 20 or none: the first to reach it wins the round                                                                                                                                                     |
+| Time limit | 3, 5, 10 minutes or none                                                                                                                                                                                    |
+
+A round ends at the frag limit or the time limit; the scoreboard shows for a few
+seconds and the next round starts. Everyone plays their own character: the look
+you picked (or your agent's palette) is what the others see.
+
+**Controls**: click the game to catch the mouse (Esc lets it go and opens the
+menu). WASD or the arrows move, the mouse (or Q E / ← →) turns, click or Space
+fires, Shift runs, 1-3 or the wheel switch weapon (pistol, shotgun, chaingun),
+Tab shows the scoreboard, M the minimap. Health packs, shells and bullets lie
+around the map and come back 20 s after someone takes them. Where the page cannot
+catch the mouse, turn with the keys or by dragging with the right button held.
+Mouse sensitivity, field of view, volume and the minimap are in the menu, and
+remembered in that browser.
+
+**How a match works**: nothing new runs anywhere. Each office moves its own
+player, resolves its own shots against what it sees and tells the target it was
+hit; the target decides whether it died. The player who joined first hosts the
+match (bots, score, clock); if they leave, the next player takes over where it
+was. The relay passes the match's frames to its players only. An office too old
+to know games simply does not see the match; an old relay drops its frames, so
+update the relay with the offices.
+
 ## Protocol
 
 The relay speaks JSON frames over one WebSocket at `/`. Each frame has a `t`
@@ -503,6 +549,7 @@ and fields are ignored on both ends, so older peers and relays keep working.
 | office → relay | `{ t: 'layout', layout, base, id }` (an edit made on revision `base`)                   |
 | office → relay | `{ t: 'signal', to, data }` (WebRTC offer/answer/candidate, invite)                     |
 | office → relay | `{ t: 'meet', ev: { kind, text } }` (chat, reaction, caption, notes)                    |
+| office → relay | `{ t: 'play', ev: { k, … } }` (a frame of the sender's match)                           |
 | relay → office | `{ t: 'welcome', peerId, since, peers: Peer[], layout, layoutOwner, rev, iceServers? }` |
 | relay → office | `{ t: 'peer', peer: Peer }`                                                             |
 | relay → office | `{ t: 'leave', peerId }`                                                                |
@@ -512,6 +559,7 @@ and fields are ignored on both ends, so older peers and relays keep working.
 | relay → office | `{ t: 'layoutReject', id, rev, reason }` (to the editor: `stale` or `busy`)             |
 | relay → office | `{ t: 'signal', from, data }` (to the one peer named in `to`)                           |
 | relay → office | `{ t: 'meet', from, name, meetingId, ev, ts }` (that meeting only)                      |
+| relay → office | `{ t: 'play', from, gameId, ev }` (the match's other players, never back to the sender) |
 
 The office forwards all of this to its UI through `core/asyncapi.yaml`:
 `remotePeers` (where `RemoteAgent`, `RemotePose`, `PeerProfile` and each peer's
@@ -528,4 +576,8 @@ calendar and Spotify use `calendarState` / `configureCalendar` and
 presence nobody refreshes, so a closed tab leaves), `sendMeetingSignal`,
 `sendMeetingEvent` and `generateMeetingNotes`, answered by `meetingSignal`,
 `meetingEvent` and `meetingNotesResult`; `multiplayerStatus` carries the office's
-`peerId`, the relay `clockOffset` and the `iceServers`.
+`peerId`, the relay `clockOffset` and the `iceServers`. Games use
+`updateGamePresence` (re-sent every 5 s while playing, like a meeting presence)
+and `sendGameFrame`, answered by `gameFrame`; `RemotePeer.game` is each peer's
+match presence (`GamePresence`, `FpsConfig`) and `GameFrameBody` / `FpsMapData`
+are the frames (see `server/src/multiplayer/gameProtocol.ts`).

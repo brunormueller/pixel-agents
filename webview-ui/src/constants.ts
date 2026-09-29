@@ -631,3 +631,108 @@ export const DOOR_HOLD_SEC = 0.6;
 /** Someone this close to the doorway (px, along the way through / across it) opens the door. */
 export const DOOR_REACH_PX = 14;
 export const DOOR_REACH_ACROSS_PX = 7;
+
+// ── Games: Pixel Frag (a first-person match, solo with bots or with the room) ──
+/** Internal render resolution: pixels tall; the width follows the screen's shape. Scaled up pixel-sharp. */
+export const FPS_RENDER_HEIGHT = 200;
+export const FPS_RENDER_MIN_WIDTH = 240;
+export const FPS_RENDER_MAX_WIDTH = 480;
+/** Heights in wall units (a wall is 1 tall): the eye, and a character as drawn. */
+export const FPS_EYE_HEIGHT = 0.5;
+export const FPS_CHARACTER_HEIGHT = 0.85;
+/** Furniture drawn in the map: world units per sprite pixel, and the tallest it may stand.
+ *  Office sprites are drawn from above at an angle (their top shows), so they stand
+ *  squashed to FPS_FURNITURE_HEIGHT_SQUASH of their drawn height. */
+export const FPS_FURNITURE_UNITS_PER_PX = 1 / 26;
+export const FPS_FURNITURE_HEIGHT_SQUASH = 0.72;
+export const FPS_FURNITURE_MAX_HEIGHT = 1;
+/** A desk (or crate) as a solid waist-high block, wall units. Must stay under the eye. */
+export const FPS_BLOCK_HEIGHT = 0.4;
+/** Collision radius of a player (cells) and the radius a shot hits within. */
+export const FPS_PLAYER_RADIUS = 0.25;
+export const FPS_HIT_RADIUS = 0.32;
+/** Movement, cells per second; turning with the keys, radians per second. */
+export const FPS_WALK_SPEED = 3.4;
+export const FPS_RUN_SPEED = 5.2;
+export const FPS_KEY_TURN_SPEED = 2.8;
+/** Mouse look: radians per pixel of movement at sensitivity 1. */
+export const FPS_MOUSE_RADIANS_PER_PX = 0.0022;
+export const FPS_MAX_HP = 100;
+export const FPS_RESPAWN_SEC = 3;
+/** Just back in (or a round just began): nobody can hurt you this long, and bots leave you be. */
+export const FPS_SPAWN_GUARD_SEC = 1.5;
+/** Where the eye sinks to while dead (kept above the waist-high blocks). */
+export const FPS_DEAD_EYE_HEIGHT = 0.47;
+/** Things fade into the map's fog color over this many cells (at most FPS_FOG_MAX_FADE of the way). */
+export const FPS_FOG_DISTANCE = 16;
+export const FPS_FOG_MAX_FADE = 0.85;
+/** Walls facing north/south are drawn this much darker (a cheap sense of light). */
+export const FPS_SIDE_SHADE = 0.78;
+/** Picking an item up: how close (cells), and how long until it is back. */
+export const FPS_PICKUP_RADIUS = 0.55;
+export const FPS_ITEM_RESPAWN_SEC = 20;
+export const FPS_HEALTH_PICKUP = 25;
+export const FPS_SHELLS_PICKUP = 8;
+export const FPS_BULLETS_PICKUP = 40;
+export const FPS_START_SHELLS = 8;
+export const FPS_START_BULLETS = 50;
+export const FPS_MAX_SHELLS = 40;
+export const FPS_MAX_BULLETS = 200;
+/** How often a player sends where it is, the host the bots, the host the score (ms). */
+export const FPS_NET_POS_INTERVAL_MS = 66;
+export const FPS_NET_BOTS_INTERVAL_MS = 100;
+export const FPS_NET_SCORE_INTERVAL_MS = 2_000;
+/** Remote players glide toward their last reported spot at this rate (per second). */
+export const FPS_REMOTE_SMOOTHING = 14;
+/** A remote player whose last report is older than this is not drawn (ms). */
+export const FPS_REMOTE_STALE_MS = 3_000;
+/** A round that ended shows the standings this long before the next one starts. */
+export const FPS_ROUND_RESTART_MS = 8_000;
+/** The relay caps these too (server/src/constants.ts FPS_*). */
+export const FPS_MAX_BOTS = 8;
+export const FPS_MAX_FRAG_LIMIT = 100;
+export const FPS_MAX_TIME_LIMIT_MIN = 60;
+/** While in a match the page re-sends its presence this often (the server drops a stale one). */
+export const FPS_PRESENCE_HEARTBEAT_MS = 5_000;
+/** Kill feed lines stay this long; at most this many at once. */
+export const FPS_FEED_SHOW_MS = 5_000;
+export const FPS_FEED_MAX_LINES = 5;
+/** On-screen hints ("Picked up health") stay this long. */
+export const FPS_MESSAGE_SHOW_MS = 2_000;
+/** How long a hurt flash, a hit marker and a muzzle flash last (seconds). */
+export const FPS_HURT_FLASH_SEC = 0.35;
+export const FPS_HIT_MARKER_SEC = 0.18;
+export const FPS_MUZZLE_FLASH_SEC = 0.07;
+/** Bullet puffs on walls: how long they stay (seconds), at most how many. */
+export const FPS_PUFF_SEC = 0.35;
+export const FPS_MAX_PUFFS = 24;
+/** Minimap: cells shown around the player, CSS px per cell. */
+export const FPS_MINIMAP_RADIUS_CELLS = 10;
+export const FPS_MINIMAP_CELL_PX = 6;
+/** Personal settings (sensitivity, field of view, volume) remembered in this browser. */
+export const FPS_SETTINGS_STORAGE_KEY = 'pixelAgents.fps.settings';
+export const FPS_DEFAULT_FOV_DEG = 75;
+export const FPS_MIN_FOV_DEG = 55;
+export const FPS_MAX_FOV_DEG = 100;
+export const FPS_DEFAULT_SENSITIVITY = 1;
+export const FPS_DEFAULT_VOLUME = 0.5;
+/** The game covers the whole office (over panels and toasts). */
+export const FPS_OVERLAY_Z_INDEX = 70;
+/** HUD colors (drawn on the game canvas). */
+export const FPS_HUD_TEXT_COLOR = '#f0f0f5';
+export const FPS_HUD_SHADOW_COLOR = '#000000';
+export const FPS_HUD_MUTED_COLOR = '#a0a0b8';
+export const FPS_HUD_ACCENT_COLOR = '#746fff';
+export const FPS_HUD_HEALTH_COLOR = '#7cfc9a';
+export const FPS_HUD_LOW_HEALTH_COLOR = '#ff5a5a';
+export const FPS_HUD_AMMO_COLOR = '#ffd35a';
+export const FPS_HUD_PANEL_COLOR = 'rgba(10, 10, 20, 0.62)';
+export const FPS_HUD_CROSSHAIR_COLOR = 'rgba(255, 255, 255, 0.85)';
+export const FPS_HUD_HIT_MARKER_COLOR = '#ff4040';
+export const FPS_HUD_HURT_COLOR = 'rgba(220, 20, 20, 0.35)';
+export const FPS_HUD_DEAD_COLOR = 'rgba(90, 0, 0, 0.45)';
+export const FPS_HUD_SELF_COLOR = '#ffd35a';
+export const FPS_MINIMAP_WALL_COLOR = 'rgba(200, 200, 220, 0.75)';
+export const FPS_MINIMAP_BLOCK_COLOR = 'rgba(160, 120, 80, 0.75)';
+export const FPS_MINIMAP_FLOOR_COLOR = 'rgba(20, 20, 30, 0.55)';
+export const FPS_MINIMAP_ITEM_COLOR = '#7cfc9a';

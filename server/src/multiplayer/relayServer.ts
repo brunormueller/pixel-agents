@@ -18,14 +18,18 @@ import {
   MULTIPLAYER_MAX_MEET_EVENTS_PER_WINDOW,
   MULTIPLAYER_MAX_MEET_FRAME_BYTES,
   MULTIPLAYER_MAX_PEERS_PER_ROOM,
+  MULTIPLAYER_MAX_PLAY_FRAME_BYTES,
+  MULTIPLAYER_MAX_PLAY_FRAMES_PER_WINDOW,
   MULTIPLAYER_MAX_SIGNAL_BYTES,
   MULTIPLAYER_MAX_SIGNALS_PER_WINDOW,
   MULTIPLAYER_MEET_WINDOW_MS,
+  MULTIPLAYER_PLAY_WINDOW_MS,
   MULTIPLAYER_PROTOCOL_VERSION,
   MULTIPLAYER_SIGNAL_WINDOW_MS,
 } from '../constants.js';
 import type {
   ClientFrame,
+  GamePresence,
   IceServer,
   MeetingPresence,
   PeerProfile,
@@ -46,6 +50,8 @@ interface RelayPeer {
   profile?: PeerProfile;
   /** The meeting this peer's person is in (from its last state frame). */
   meeting?: MeetingPresence;
+  /** The match this peer's person plays (from its last state frame). */
+  game?: GamePresence;
   socket: WebSocket;
   alive: boolean;
   /** Rate limiting: frames seen in the current one-second window. */
@@ -61,6 +67,8 @@ interface RelayPeer {
   meetWindowCount: number;
   layoutWindowStart: number;
   layoutWindowCount: number;
+  playWindowStart: number;
+  playWindowCount: number;
 }
 
 interface RelayRoom {
@@ -105,6 +113,7 @@ const snapshotOf = (p: RelayPeer): PeerSnapshot => ({
   since: p.since,
   ...(p.profile ? { profile: p.profile } : {}),
   ...(p.meeting ? { meeting: p.meeting } : {}),
+  ...(p.game ? { game: p.game } : {}),
 });
 
 /** Largest accepted frame of each kind: layouts and SDP offers are the big ones. */
@@ -112,13 +121,14 @@ function frameLimit(frame: ClientFrame): number {
   if (frame.t === 'layout') return MULTIPLAYER_MAX_LAYOUT_BYTES;
   if (frame.t === 'signal') return MULTIPLAYER_MAX_SIGNAL_BYTES;
   if (frame.t === 'meet') return MULTIPLAYER_MAX_MEET_FRAME_BYTES;
+  if (frame.t === 'play') return MULTIPLAYER_MAX_PLAY_FRAME_BYTES;
   return MULTIPLAYER_MAX_FRAME_BYTES;
 }
 
 /** Sliding-window rate limit shared by the per-kind counters: true = over the limit. */
 function overLimit(
   peer: RelayPeer,
-  kind: 'chat' | 'signal' | 'meet' | 'layout',
+  kind: 'chat' | 'signal' | 'meet' | 'layout' | 'play',
   now: number,
   windowMs: number,
   max: number,
@@ -154,7 +164,9 @@ function send(socket: WebSocket, frame: RelayFrame): void {
  *
  * Meetings pass through only as signaling: a `signal` goes to the one peer it
  * names, a `meet` event to the peers whose last state names the sender's
- * meeting. Audio and video never touch the relay.
+ * meeting. Audio and video never touch the relay. Games pass through the same
+ * way: a `play` frame goes to the other peers whose last state names the
+ * sender's match.
  */
 export async function startRelayServer(opts: RelayServerOptions = {}): Promise<RelayServerHandle> {
   const rooms = new Map<string, RelayRoom>();
@@ -226,6 +238,8 @@ export async function startRelayServer(opts: RelayServerOptions = {}): Promise<R
           meetWindowCount: 0,
           layoutWindowStart: now,
           layoutWindowCount: 0,
+          playWindowStart: now,
+          playWindowCount: 0,
         };
         if (existing) {
           room = existing;
@@ -328,6 +342,28 @@ export async function startRelayServer(opts: RelayServerOptions = {}): Promise<R
         return;
       }
 
+      if (frame.t === 'play') {
+        const game = peer.game;
+        if (!game) return; // playing in a match you are not in
+        if (
+          overLimit(
+            peer,
+            'play',
+            now,
+            MULTIPLAYER_PLAY_WINDOW_MS,
+            MULTIPLAYER_MAX_PLAY_FRAMES_PER_WINDOW,
+          )
+        ) {
+          return;
+        }
+        const out: RelayFrame = { t: 'play', from: peer.peerId, gameId: game.id, ev: frame.ev };
+        // Not back to the sender: it already applied its own frame.
+        for (const p of room.peers.values()) {
+          if (p !== peer && p.game?.id === game.id) send(p.socket, out);
+        }
+        return;
+      }
+
       if (frame.t === 'layout') {
         const refuse = (reason: 'stale' | 'busy') => {
           if (frame.id) send(socket, { t: 'layoutReject', id: frame.id, rev: room!.rev, reason });
@@ -374,6 +410,7 @@ export async function startRelayServer(opts: RelayServerOptions = {}): Promise<R
       peer.desk = frame.desk;
       peer.profile = frame.profile;
       peer.meeting = frame.meeting;
+      peer.game = frame.game;
       broadcast(room, { t: 'peer', peer: snapshotOf(peer) }, peer.peerId);
     });
 

@@ -254,3 +254,11 @@ _Avoid_: guest agent, foreign agent, online agent
 **Meeting**:
 A video call inside a room. Each peer publishes its person's presence in it (mic, camera, shared screens, raised hand, recording); a meeting is simply every peer publishing the same id, so there is no host and nothing to end. Audio, video and screens go browser to browser; the relay only passes the call's setup, chat and captions along, and only to that meeting's participants.
 _Avoid_: call room, conference, huddle (a Meeting lives inside a Room, it is not one)
+
+**Match**:
+One game of Pixel Frag (the first-person shooter) played inside a room. Like a meeting it is a set of presences: every peer in it publishes the same match id, and its frames reach only that match's other peers. The peer that joined first is its **host** — it runs the bots, keeps the score and the round clock and sends the office map to newcomers; when it leaves, the next one takes over where it was. Each peer owns its own player: it says where it is, resolves its own shots and is the only one who decides it died. A **solo** match is the same game with no room at all: this office alone, against bots.
+_Avoid_: lobby, server, session (a Match lives inside a Room; a solo match needs no Room)
+
+**Bot**:
+A computer-controlled player in a match, run by the match's host (drawn with an office character sprite, named "(bot)"). Not an agent: bots have nothing to do with Claude sessions and never appear in the office.
+_Avoid_: NPC in code (fine in conversation), AI player, agent

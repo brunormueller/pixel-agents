@@ -12,7 +12,7 @@ import { Button } from './ui/Button.js';
 import { Dropdown, DropdownItem } from './ui/Dropdown.js';
 
 /** The panels docked on the right; one at a time. */
-export type SidePanelId = 'chat' | 'people' | 'calendar' | 'music' | 'decor' | 'meet';
+export type SidePanelId = 'chat' | 'people' | 'calendar' | 'music' | 'decor' | 'meet' | 'games';
 
 interface BottomToolbarProps {
   isEditMode: boolean;
@@ -52,6 +52,8 @@ interface BottomToolbarProps {
   onStatusChange: (status: PersonStatus, statusText: string) => void;
   /** Spotify is playing (a note on the Music button). */
   musicPlaying: boolean;
+  /** Matches going on in the room (a count on the Games button). */
+  gameCount: number;
 }
 
 export function BottomToolbar({
@@ -82,6 +84,7 @@ export function BottomToolbar({
   inMeeting,
   onStatusChange,
   musicPlaying,
+  gameCount,
 }: BottomToolbarProps) {
   const [isEmoteMenuOpen, setIsEmoteMenuOpen] = useState(false);
   const emoteMenuRef = useRef<HTMLDivElement>(null);
@@ -367,6 +370,14 @@ export function BottomToolbar({
           )}
         </Button>
       )}
+      <Button
+        variant={sidePanel === 'games' ? 'active' : 'default'}
+        onClick={() => onToggleSidePanel('games')}
+        title="Pixel Frag, a first-person shooter: solo against bots, or with the room"
+        data-testid="games-toggle"
+      >
+        {gameCount > 0 ? `Games (${gameCount})` : 'Games'}
+      </Button>
       <Button
         variant={sidePanel === 'calendar' ? 'active' : 'default'}
         onClick={() => onToggleSidePanel('calendar')}
